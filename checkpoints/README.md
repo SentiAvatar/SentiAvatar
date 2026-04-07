@@ -29,14 +29,3 @@ checkpoints/
 └── eval_model/                       # ChronAccRet 评测模型
     └── best_model.pt
 ```
-
-## 下载链接
-
-| 模型 | 下载链接 |
-|------|----------|
-| LLM (Qwen2-0.5B SFT) | [HuggingFace](https://huggingface.co/) |
-| Mask Transformer | [HuggingFace](https://huggingface.co/) |
-| RVQVAE | [HuggingFace](https://huggingface.co/) |
-| Face VQVAE | [HuggingFace](https://huggingface.co/) |
-| Chinese HuBERT | [HuggingFace](https://huggingface.co/TencentGameMate/chinese-hubert-base) |
-| ChronAccRet Eval Model | [HuggingFace](https://huggingface.co/) |
