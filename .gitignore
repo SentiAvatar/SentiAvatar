@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Outputs
+output/
+output_*/
+*.log
+nohup.out
+
+# Model checkpoints (too large for git)
+checkpoints/llm/
+checkpoints/mask_transformer/
+checkpoints/rvqvae/
+checkpoints/face_vqvae/
+checkpoints/chinese-hubert-base/
+checkpoints/eval_model/
+
+# Dataset (too large for git)
+data/arkit_data/*.npy
+data/wav_data/*.wav
+data/motion_data/**/*.npy
+data/text_data/motion2text.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Hydra outputs
+outputs/

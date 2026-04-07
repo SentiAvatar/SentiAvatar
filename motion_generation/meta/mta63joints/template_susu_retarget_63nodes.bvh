@@ -1,0 +1,372 @@
+HIERARCHY
+ROOT pelvis
+{
+  OFFSET -20.459700 -3.402440 102.818000
+  CHANNELS 6 Xposition Yposition Zposition Zrotation Xrotation Yrotation
+  JOINT spine_01
+  {
+    OFFSET 2.595450 0.208490 0.000000
+    CHANNELS 3 Zrotation Xrotation Yrotation
+    JOINT spine_02
+    {
+      OFFSET 4.877290 -0.954006 0.022121
+      CHANNELS 3 Zrotation Xrotation Yrotation
+      JOINT spine_03
+      {
+        OFFSET 6.297470 0.000308 -0.000423
+        CHANNELS 3 Zrotation Xrotation Yrotation
+        JOINT spine_04
+        {
+          OFFSET 6.663410 -0.000045 0.000068
+          CHANNELS 3 Zrotation Xrotation Yrotation
+          JOINT spine_05
+          {
+            OFFSET 13.137500 0.000042 0.000127
+            CHANNELS 3 Zrotation Xrotation Yrotation
+            JOINT neck_01
+            {
+              OFFSET 13.870200 -0.000043 0.000048
+              CHANNELS 3 Zrotation Xrotation Yrotation
+              JOINT neck_02
+              {
+                OFFSET 4.295250 0.000000 0.000045
+                CHANNELS 3 Zrotation Xrotation Yrotation
+                JOINT head
+                {
+                  OFFSET 4.491710 0.000740 0.001639
+                  CHANNELS 3 Zrotation Xrotation Yrotation
+                  End Site
+                  {
+                    OFFSET 0.000000 0.000000 0.000000
+                  }
+                }
+              }
+            }
+            JOINT clavicle_l
+            {
+              OFFSET 8.029550 0.614939 -0.570049
+              CHANNELS 3 Zrotation Xrotation Yrotation
+              JOINT upperarm_l
+              {
+                OFFSET 10.136200 0.000000 0.000032
+                CHANNELS 3 Zrotation Xrotation Yrotation
+                JOINT lowerarm_l
+                {
+                  OFFSET 28.731500 0.000017 0.000177
+                  CHANNELS 3 Zrotation Xrotation Yrotation
+                  JOINT hand_l
+                  {
+                    OFFSET 24.762400 0.000000 0.000000
+                    CHANNELS 3 Zrotation Xrotation Yrotation
+                    JOINT thumb_01_l
+                    {
+                      OFFSET 1.645750 1.668330 -1.524320
+                      CHANNELS 3 Zrotation Xrotation Yrotation
+                      JOINT thumb_02_l
+                      {
+                        OFFSET 4.551640 0.000000 0.000000
+                        CHANNELS 3 Zrotation Xrotation Yrotation
+                        JOINT thumb_03_l
+                        {
+                          OFFSET 2.644270 0.000000 0.000000
+                          CHANNELS 3 Zrotation Xrotation Yrotation
+                          End Site
+                          {
+                            OFFSET 0 0 0
+                          }
+                        }
+                      }
+                    }
+                    JOINT index_metacarpal_l
+                    {
+                      OFFSET 3.005770 0.596985 -1.772920
+                      CHANNELS 3 Zrotation Xrotation Yrotation
+                      JOINT index_01_l
+                      {
+                        OFFSET 4.688790 0.000000 0.000000
+                        CHANNELS 3 Zrotation Xrotation Yrotation
+                        JOINT index_02_l
+                        {
+                          OFFSET 4.383510 0.000000 0.000000
+                          CHANNELS 3 Zrotation Xrotation Yrotation
+                          JOINT index_03_l
+                          {
+                            OFFSET 1.965240 0.000000 0.000000
+                            CHANNELS 3 Zrotation Xrotation Yrotation
+                            End Site
+                            {
+                              OFFSET 0 0 0
+                            }
+                          }
+                        }
+                      }
+                    }
+                    JOINT middle_metacarpal_l
+                    {
+                      OFFSET 2.804600 0.096878 -0.451881
+                      CHANNELS 3 Zrotation Xrotation Yrotation
+                      JOINT middle_01_l
+                      {
+                        OFFSET 5.012010 0.000000 0.000000
+                        CHANNELS 3 Zrotation Xrotation Yrotation
+                        JOINT middle_02_l
+                        {
+                          OFFSET 4.395510 0.000000 0.000000
+                          CHANNELS 3 Zrotation Xrotation Yrotation
+                          JOINT middle_03_l
+                          {
+                            OFFSET 2.842500 0.000000 0.000000
+                            CHANNELS 3 Zrotation Xrotation Yrotation
+                            End Site
+                            {
+                              OFFSET 0 0 0
+                            }
+                          }
+                        }
+                      }
+                    }
+                    JOINT ring_metacarpal_l
+                    {
+                      OFFSET 2.852190 -0.096878 0.451885
+                      CHANNELS 3 Zrotation Xrotation Yrotation
+                      JOINT ring_01_l
+                      {
+                        OFFSET 4.533700 0.000000 0.000000
+                        CHANNELS 3 Zrotation Xrotation Yrotation
+                        JOINT ring_02_l
+                        {
+                          OFFSET 3.768560 0.000000 0.000000
+                          CHANNELS 3 Zrotation Xrotation Yrotation
+                          JOINT ring_03_l
+                          {
+                            OFFSET 3.036250 0.000000 0.000000
+                            CHANNELS 3 Zrotation Xrotation Yrotation
+                            End Site
+                            {
+                              OFFSET 0 0 0
+                            }
+                          }
+                        }
+                      }
+                    }
+                    JOINT pinky_metacarpal_l
+                    {
+                      OFFSET 2.818930 -0.276169 1.463940
+                      CHANNELS 3 Zrotation Xrotation Yrotation
+                      JOINT pinky_01_l
+                      {
+                        OFFSET 4.238140 0.000000 0.000000
+                        CHANNELS 3 Zrotation Xrotation Yrotation
+                        JOINT pinky_02_l
+                        {
+                          OFFSET 2.504320 0.000000 0.000000
+                          CHANNELS 3 Zrotation Xrotation Yrotation
+                          JOINT pinky_03_l
+                          {
+                            OFFSET 1.820020 0.000000 0.000000
+                            CHANNELS 3 Zrotation Xrotation Yrotation
+                            End Site
+                            {
+                              OFFSET 0 0 0
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            JOINT clavicle_r
+            {
+              OFFSET 8.029690 0.615852 0.570123
+              CHANNELS 3 Zrotation Xrotation Yrotation
+              JOINT upperarm_r
+              {
+                OFFSET -10.135000 -0.002579 -0.000361
+                CHANNELS 3 Zrotation Xrotation Yrotation
+                JOINT lowerarm_r
+                {
+                  OFFSET -28.732900 0.001365 0.005621
+                  CHANNELS 3 Zrotation Xrotation Yrotation
+                  JOINT hand_r
+                  {
+                    OFFSET -24.764600 -0.001016 0.000179
+                    CHANNELS 3 Zrotation Xrotation Yrotation
+                    JOINT thumb_01_r
+                    {
+                      OFFSET -1.923320 -1.572070 1.284710
+                      CHANNELS 3 Zrotation Xrotation Yrotation
+                      JOINT thumb_02_r
+                      {
+                        OFFSET -4.550090 0.000000 0.000000
+                        CHANNELS 3 Zrotation Xrotation Yrotation
+                        JOINT thumb_03_r
+                        {
+                          OFFSET -2.644480 0.000000 0.000000
+                          CHANNELS 3 Zrotation Xrotation Yrotation
+                          End Site
+                          {
+                            OFFSET 0 0 0
+                          }
+                        }
+                      }
+                    }
+                    JOINT index_metacarpal_r
+                    {
+                      OFFSET -3.268700 -0.454758 1.283810
+                      CHANNELS 3 Zrotation Xrotation Yrotation
+                      JOINT index_01_r
+                      {
+                        OFFSET -4.687710 0.000000 0.000000
+                        CHANNELS 3 Zrotation Xrotation Yrotation
+                        JOINT index_02_r
+                        {
+                          OFFSET -4.381770 0.000000 0.000000
+                          CHANNELS 3 Zrotation Xrotation Yrotation
+                          JOINT index_03_r
+                          {
+                            OFFSET -1.966530 0.000000 0.000000
+                            CHANNELS 3 Zrotation Xrotation Yrotation
+                            End Site
+                            {
+                              OFFSET 0 0 0
+                            }
+                          }
+                        }
+                      }
+                    }
+                    JOINT middle_metacarpal_r
+                    {
+                      OFFSET -2.840320 0.000000 0.000000
+                      CHANNELS 3 Zrotation Xrotation Yrotation
+                      JOINT middle_01_r
+                      {
+                        OFFSET -5.011120 0.000000 0.000000
+                        CHANNELS 3 Zrotation Xrotation Yrotation
+                        JOINT middle_02_r
+                        {
+                          OFFSET -4.393970 0.000000 0.000000
+                          CHANNELS 3 Zrotation Xrotation Yrotation
+                          JOINT middle_03_r
+                          {
+                            OFFSET -2.845580 0.000000 0.000000
+                            CHANNELS 3 Zrotation Xrotation Yrotation
+                            End Site
+                            {
+                              OFFSET 0 0 0
+                            }
+                          }
+                        }
+                      }
+                    }
+                    JOINT ring_metacarpal_r
+                    {
+                      OFFSET -2.735520 0.168312 -0.904747
+                      CHANNELS 3 Zrotation Xrotation Yrotation
+                      JOINT ring_01_r
+                      {
+                        OFFSET -4.532910 0.000000 0.000000
+                        CHANNELS 3 Zrotation Xrotation Yrotation
+                        JOINT ring_02_r
+                        {
+                          OFFSET -3.768440 0.000000 0.000000
+                          CHANNELS 3 Zrotation Xrotation Yrotation
+                          JOINT ring_03_r
+                          {
+                            OFFSET -3.036350 0.000000 0.000000
+                            CHANNELS 3 Zrotation Xrotation Yrotation
+                            End Site
+                            {
+                              OFFSET 0 0 0
+                            }
+                          }
+                        }
+                      }
+                    }
+                    JOINT pinky_metacarpal_r
+                    {
+                      OFFSET -2.535800 0.313965 -1.904450
+                      CHANNELS 3 Zrotation Xrotation Yrotation
+                      JOINT pinky_01_r
+                      {
+                        OFFSET -4.232780 0.000000 0.000000
+                        CHANNELS 3 Zrotation Xrotation Yrotation
+                        JOINT pinky_02_r
+                        {
+                          OFFSET -2.504480 0.000000 0.000000
+                          CHANNELS 3 Zrotation Xrotation Yrotation
+                          JOINT pinky_03_r
+                          {
+                            OFFSET -1.821450 0.000000 0.000000
+                            CHANNELS 3 Zrotation Xrotation Yrotation
+                            End Site
+                            {
+                              OFFSET 0 0 0
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  JOINT thigh_l
+  {
+    OFFSET -2.313150 -0.051123 -9.310610
+    CHANNELS 3 Zrotation Xrotation Yrotation
+    JOINT calf_l
+    {
+      OFFSET -46.661800 -0.000912 -0.000026
+      CHANNELS 3 Zrotation Xrotation Yrotation
+      JOINT foot_l
+      {
+        OFFSET -44.414400 0.000097 0.000114
+        CHANNELS 3 Zrotation Xrotation Yrotation
+        JOINT ball_l
+        {
+          OFFSET -6.514580 -12.708700 -0.433235
+          CHANNELS 3 Zrotation Xrotation Yrotation
+          End Site
+          {
+            OFFSET 0 0 0
+          }
+        }
+      }
+    }
+  }
+  JOINT thigh_r
+  {
+    OFFSET -2.313340 -0.050603 9.310440
+    CHANNELS 3 Zrotation Xrotation Yrotation
+    JOINT calf_r
+    {
+      OFFSET 46.659400 0.000796 0.000019
+      CHANNELS 3 Zrotation Xrotation Yrotation
+      JOINT foot_r
+      {
+        OFFSET 44.424700 0.000030 0.000094
+        CHANNELS 3 Zrotation Xrotation Yrotation
+        JOINT ball_r
+        {
+          OFFSET 6.504510 12.709200 0.435689
+          CHANNELS 3 Zrotation Xrotation Yrotation
+          End Site
+          {
+            OFFSET 0 0 0
+          }
+        }
+      }
+    }
+  }
+}
+MOTION
+Frames: 1
+Frame Time: 0.05
+-12.104394841304973 -0.14772351416544816 -90.11001818544838 -16.86030067564764 -0.23169332146097094 -89.54685068383833 1.179361990045212e-06 3.564519124082364 -90.00000573951907 -176.8475896263968 0.5888416689345141 89.98611675709141 -16.762862055829377 -1.8966592815983614 -90.06846352289682 1.7655625192200634e-31 -1.5902775543996034e-15 -90.00000769819435 -87.87506649721966 -72.83981783202853 -95.63754266925321 86.29866606039074 0.7994826646957226 -7.682238732547525 149.73748501268238 -63.21998668973342 152.48527735973207 -8.827812596100317e-32 6.3611093629270335e-15 1.5902773407317584e-15 19.434712663149128 -5.594924892269249 -31.851593434445366 -8.827812596100317e-32 6.3611093629270335e-15 1.5902773407317584e-15 -8.827812596100317e-32 6.3611093629270335e-15 1.5902773407317584e-15 -8.827812596100317e-32 6.3611093629270335e-15 1.5902773407317584e-15 12.23955793092003 -0.7868492188115155 -7.328862598319194 -8.827812596100317e-32 6.3611093629270335e-15 1.5902773407317584e-15 -8.827812596100317e-32 6.3611093629270335e-15 1.5902773407317584e-15 -8.827812596100317e-32 6.3611093629270335e-15 1.5902773407317584e-15 2.4076543418852854 0.2635719821564769 12.493068896310776 -8.827812596100317e-32 6.3611093629270335e-15 1.5902773407317584e-15 -8.827812596100317e-32 6.3611093629270335e-15 1.5902773407317584e-15 -8.827812596100317e-32 6.3611093629270335e-15 1.5902773407317584e-15 -4.484569971025572 -1.0930752603923988 27.383840720221308 -8.827812596100317e-32 6.3611093629270335e-15 1.5902773407317584e-15 -8.827812596100317e-32 6.3611093629270335e-15 1.5902773407317584e-15 -8.827812596100317e-32 6.3611093629270335e-15 1.5902773407317584e-15 1.7422748404824495 -0.9529656674439806 -57.35174216266055 -8.827812596100317e-32 6.3611093629270335e-15 1.5902773407317584e-15 -8.827812596100317e-32 6.3611093629270335e-15 1.5902773407317584e-15 -8.827812596100317e-32 6.3611093629270335e-15 1.5902773407317584e-15 -8.827812596100317e-32 6.3611093629270335e-15 1.5902773407317584e-15 163.3722691049626 -7.699095096668445 -25.772221363904524 -84.031031283271 2.881724236707284e-06 -168.65870452151032 -79.83452788832673 -8.396540635486575e-08 -82.64128056834518 -6.3611093629270335e-15 -7.951386703658791e-16 -1.5902773407317584e-15 19.42187923845809 -5.591929466742864 -31.85573548982747 -6.3611093629270335e-15 -7.951386703658791e-16 -1.5902773407317584e-15 -6.3611093629270335e-15 -7.951386703658791e-16 -1.5902773407317584e-15 -6.3611093629270335e-15 -7.951386703658791e-16 -1.5902773407317584e-15 12.225010916197201 -0.786111986465682 -7.330769842548752 -6.3611093629270335e-15 -7.951386703658791e-16 -1.5902773407317584e-15 -6.3611093629270335e-15 -7.951386703658791e-16 -1.5902773407317584e-15 -6.3611093629270335e-15 -7.951386703658791e-16 -1.5902773407317584e-15 2.394333174070867 0.26209266365557665 12.492095560911594 -6.3611093629270335e-15 -7.951386703658791e-16 -1.5902773407317584e-15 -6.3611093629270335e-15 -7.951386703658791e-16 -1.5902773407317584e-15 -6.3611093629270335e-15 -7.951386703658791e-16 -1.5902773407317584e-15 -4.4970576154509665 -1.0960162873417134 27.381298832647513 -6.3611093629270335e-15 -7.951386703658791e-16 -1.5902773407317584e-15 -6.3611093629270335e-15 -7.951386703658791e-16 -1.5902773407317584e-15 -6.3611093629270335e-15 -7.951386703658791e-16 -1.5902773407317584e-15 1.7271733053343703 -0.944762458138077 -57.35469188679644 -6.3611093629270335e-15 -7.951386703658791e-16 -1.5902773407317584e-15 -6.3611093629270335e-15 -7.951386703658791e-16 -1.5902773407317584e-15 -6.3611093629270335e-15 -7.951386703658791e-16 -1.5902773407317584e-15 -6.3611093629270335e-15 -7.951386703658791e-16 -1.5902773407317584e-15 -7.946675553802099 -0.20854411455870636 64.19045557530654 -2.1618206028479623 0.7333691237935221 -85.85503677631264 -1.5902775543996034e-15 1.5902775543996034e-15 -90.00000769819438 -146.46277046423702 -11.161157142708491 -35.93248725306494 -8.091076290727026 1.7380795842338181 117.1154131227362 3.65575547448166 1.1379900240853655 86.1102991676925 1.5902775543996034e-15 0.0 90.00000769819438 33.53703209282206 11.161187434767253 -3.372771054106671

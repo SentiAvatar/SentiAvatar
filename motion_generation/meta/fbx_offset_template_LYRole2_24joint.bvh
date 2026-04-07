@@ -1,0 +1,150 @@
+HIERARCHY
+ROOT pelvis
+{
+  OFFSET -0.83024 -33.37500 85.66440
+  CHANNELS 6 Xposition Yposition Zposition Zrotation Xrotation Yrotation
+  JOINT spine_01
+  {
+    OFFSET 1.40051 -0.23935 0.00000
+    CHANNELS 3 Zrotation Xrotation Yrotation
+    JOINT spine_02
+    {
+      OFFSET 3.00997 0.00000 0.00000
+      CHANNELS 3 Zrotation Xrotation Yrotation
+      JOINT spine_03
+      {
+        OFFSET 5.04723 0.00000 -0.00002
+        CHANNELS 3 Zrotation Xrotation Yrotation
+        JOINT spine_04
+        {
+          OFFSET 6.53643 0.00000 0.00000
+          CHANNELS 3 Zrotation Xrotation Yrotation
+          JOINT spine_05
+          {
+            OFFSET 13.88450 0.00000 -0.00003
+            CHANNELS 3 Zrotation Xrotation Yrotation
+            JOINT neck_01
+            {
+              OFFSET 8.42210 0.00000 -0.00003
+              CHANNELS 3 Zrotation Xrotation Yrotation
+              JOINT neck_02
+              {
+                OFFSET 4.60034 0.00000 0.00000
+                CHANNELS 3 Zrotation Xrotation Yrotation
+                JOINT head
+                {
+                  OFFSET 4.18439 0.00000 -0.00002
+                  CHANNELS 3 Zrotation Xrotation Yrotation
+                  End Site
+                  {
+                    OFFSET 0 0 0
+                  }
+                }
+              }
+            }
+            JOINT clavicle_l
+            {
+              OFFSET 4.01154 0.62239 -0.58046
+              CHANNELS 3 Zrotation Xrotation Yrotation
+              JOINT upperarm_l
+              {
+                OFFSET 9.82868 0.00000 0.00000
+                CHANNELS 3 Zrotation Xrotation Yrotation
+                JOINT lowerarm_l
+                {
+                  OFFSET 20.25310 -0.00001 -0.00002
+                  CHANNELS 3 Zrotation Xrotation Yrotation
+                  JOINT hand_l
+                  {
+                    OFFSET 18.97920 0.00000 0.00000
+                    CHANNELS 3 Zrotation Xrotation Yrotation
+                    End Site
+                    {
+                      OFFSET 0 0 0
+                    }
+                  }
+                }
+              }
+            }
+            JOINT clavicle_r
+            {
+              OFFSET 4.01154 0.62236 0.58063
+              CHANNELS 3 Zrotation Xrotation Yrotation
+              JOINT upperarm_r
+              {
+                OFFSET -9.82861 0.00006 0.00003
+                CHANNELS 3 Zrotation Xrotation Yrotation
+                JOINT lowerarm_r
+                {
+                  OFFSET -20.24700 -0.00222 -0.00331
+                  CHANNELS 3 Zrotation Xrotation Yrotation
+                  JOINT hand_r
+                  {
+                    OFFSET -18.94350 -0.00219 -0.00367
+                    CHANNELS 3 Zrotation Xrotation Yrotation
+                    End Site
+                    {
+                      OFFSET 0 0 0
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  JOINT thigh_l
+  {
+    OFFSET -2.48084 -0.35962 -7.18069
+    CHANNELS 3 Zrotation Xrotation Yrotation
+    JOINT calf_l
+    {
+      OFFSET -38.42040 0.00052 -0.00006
+      CHANNELS 3 Zrotation Xrotation Yrotation
+      JOINT foot_l
+      {
+        OFFSET -35.20850 0.00000 0.00000
+        CHANNELS 3 Zrotation Xrotation Yrotation
+        JOINT ball_l
+        {
+          OFFSET -5.18319 -8.76043 1.75701
+          CHANNELS 3 Zrotation Xrotation Yrotation
+          End Site
+          {
+            OFFSET 0 0 0
+          }
+        }
+      }
+    }
+  }
+  JOINT thigh_r
+  {
+    OFFSET -2.48070 -0.35958 7.18128
+    CHANNELS 3 Zrotation Xrotation Yrotation
+    JOINT calf_r
+    {
+      OFFSET 38.42050 -0.00144 -0.00011
+      CHANNELS 3 Zrotation Xrotation Yrotation
+      JOINT foot_r
+      {
+        OFFSET 35.20850 0.00000 0.00000
+        CHANNELS 3 Zrotation Xrotation Yrotation
+        JOINT ball_r
+        {
+          OFFSET 5.18322 8.76070 -1.75702
+          CHANNELS 3 Zrotation Xrotation Yrotation
+          End Site
+          {
+            OFFSET 0 0 0
+          }
+        }
+      }
+    }
+  }
+}
+MOTION
+Frames: 1
+Frame Time: 0.05
+0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0

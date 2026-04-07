@@ -1,0 +1,76 @@
+# 修改了vae，T5  修改了text 1024
+exp_name: bert_orig
+model_save_dir: ./output/${exp_name}/
+save_dir: ./output/${exp_name}/contrastive_results/
+mean_path: ./stats/humanml3d/guoh3dfeats/mean.pt
+std_path: ./stats/humanml3d/guoh3dfeats/std.pt
+
+hydra:
+  run:
+    dir: ./output/${exp_name}/
+
+defaults:
+  - _self_
+
+model:
+  text_model_name: bert-base-chinese #RoBERTa-wwm  #bert-base-chinese  #distilbert-base-uncased  #t5-large   #distilbert-base-uncased
+  temperature: 0.1
+  threshold_selfsim: 0.80 
+  threshold_selfsim_metrics: 0.95
+  token_num: 128
+  noneg: True
+
+lmd:
+  recons: 1.0 #1.0
+  latent: 1.0e-5  #1.0e-5
+  kl: 1.0e-5  #1.0e-5
+  contrast: 1  #0.1
+  recon: True
+
+motion_encoder:
+  nfeats: 153  #393
+  vae: False  #True
+  latent_dim: 256
+  ff_size: 1024
+  num_layers: 6
+  num_heads: 4
+  dropout: 0.1
+  activation: gelu
+
+text_encoder:
+  nfeats: 768
+  vae: False   #True
+  latent_dim: 256
+  ff_size: 1024
+  num_layers: 6
+  num_heads: 4
+  dropout: 0.1
+  activation: gelu
+
+motion_decoder:
+  nfeats: 153
+  latent_dim: 256
+  ff_size: 1024
+  num_layers: 6
+  num_heads: 4
+  dropout: 0.1
+  activation: gelu
+
+dataset:
+  data_dir: ./data/humanml3d/
+  max_motion_length: 224 #224
+  padding: True
+  ev2ev: True
+  
+dataloader:
+  batch_size: 64
+  num_workers: 8
+
+train:
+  seed: 1234
+  epochs: 200
+  lr: 1.0e-04
+  langlr: 1.0e-05
+  train_text_encoder: True
+
+  
