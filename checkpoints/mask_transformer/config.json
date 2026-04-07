@@ -1,0 +1,22 @@
+{
+  "architectures": [
+    "AudioMotionTransformer"
+  ],
+  "audio_feat_dim": 768,
+  "codebook_size": 512,
+  "cond_drop_prob": 0.2,
+  "dropout": 0.2,
+  "dtype": "float32",
+  "hidden_act": "gelu",
+  "hidden_size": 512,
+  "intermediate_size": 1536,
+  "max_position_embeddings": 512,
+  "model_type": "audio_motion_transformer",
+  "num_frames": 5,
+  "num_heads": 16,
+  "num_layers": 8,
+  "num_tokens_per_frame": 4,
+  "rms_norm_eps": 1e-06,
+  "transformers_version": "4.57.1",
+  "vocab_size": 2049
+}
