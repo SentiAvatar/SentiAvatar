@@ -1,5 +1,9 @@
-# SentiAvatar: Towards Expressive and Interactive Digital Humans
+<p align="center">
+  <img src="./assets/banner.png" alt="Banner" width="100%">
+</p>
 
+
+# SentiAvatar: Towards Expressive and Interactive Digital Humans
 <p align="center">
   <a href="https://arxiv.org/abs/2604.02908"><img src="https://img.shields.io/badge/arXiv-2604.02908-b31b1b.svg" alt="arXiv"></a>
   <a href="#license"><img src="https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg" alt="License"></a>
