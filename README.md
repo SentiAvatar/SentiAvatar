@@ -2,7 +2,6 @@
   <img src="./assets/banner.png" alt="Banner" width="100%">
 </p>
 
-
 # SentiAvatar: Towards Expressive and Interactive Digital Humans
 <p align="center">
   <a href="https://arxiv.org/abs/2604.02908"><img src="https://img.shields.io/badge/arXiv-2604.02908-b31b1b.svg" alt="arXiv"></a>
@@ -319,5 +318,5 @@ For commercial licensing, please contact the authors.
 ---
 
 <p align="center">
-  Made with ❤️ by the SentiAvatar Team
+  Made with ❤️ by the SentiPulse Team
 </p>
