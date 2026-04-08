@@ -297,6 +297,12 @@ If you find this work useful, please cite our paper:
 }
 ```
 
+## ⭐ Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=SentiAvatar/SentiAvatar&type=Date)](https://star-history.com/#SentiAvatar/SentiAvatar&Date)
+
+##### If you like this project, please give it a star ⭐! It would be a great encouragement for us and help more people discover this work.
+
 ## 🙏 Acknowledgments
 
 We thank the following open-source projects:
