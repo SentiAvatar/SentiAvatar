@@ -119,7 +119,7 @@ Our pipeline consists of three stages:
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourorg/SentiAvatar.git
+git clone https://github.com/SentiAvatar/SentiAvatar.git
 cd SentiAvatar
 
 # Create environment
