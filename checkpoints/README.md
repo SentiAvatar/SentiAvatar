@@ -1,4 +1,4 @@
-# Model Checkpoints
+# SentiAvatar Model Checkpoints
 
 请从以下位置下载模型权重，并放置到此目录下：
 

@@ -41,74 +41,138 @@ from infer import load_config_from_checkpoint, load_model, fixseed
 from actions.postprocess import MotionPostprocesser
 
 
+def resample_fps_1d(x_np, src_fps=50.0, tgt_fps=10.0):
+    """
+    对 (T, D) 的特征序列进行帧率重采样（使用线性插值）。
+    
+    Args:
+        x_np: numpy array, shape (T, D)
+        src_fps: 原始帧率
+        tgt_fps: 目标帧率
+    
+    Returns:
+        numpy array, shape (T_new, D)
+    """
+    import torch.nn.functional as F
+    x = torch.tensor(x_np, dtype=torch.float32)
+    # reshape to (1, T, D, 1) for resample_fps compatible format
+    x = x[None, :, :, None]  # (1, T, D, 1)
+    B, T, J, D = x.shape
+    new_T = max(1, int(round(T * (tgt_fps / src_fps))))
+    y = x.permute(0, 2, 3, 1).contiguous().view(B, J * D, T)
+    y2 = F.interpolate(y, size=new_T, mode="linear", align_corners=False)
+    out = y2.view(B, J, D, new_T).permute(0, 3, 1, 2).contiguous()
+    out = out.squeeze(0).squeeze(-1)  # (T_new, D)
+    return out.numpy()
+
+
+class ApplyKmeans(object):
+    """HuBERT K-means 量化器，将连续特征映射为离散 token"""
+    def __init__(self, km_path):
+        import joblib
+        self.km_model = joblib.load(km_path)
+        self.C_np = self.km_model.cluster_centers_.transpose()
+        self.Cnorm_np = (self.C_np ** 2).sum(0, keepdims=True)
+        self.C = torch.from_numpy(self.C_np)
+        self.Cnorm = torch.from_numpy(self.Cnorm_np)
+
+    def __call__(self, x):
+        if isinstance(x, torch.Tensor):
+            dist = (
+                x.pow(2).sum(1, keepdim=True) - 2 * torch.matmul(x, self.C) + self.Cnorm
+            )
+            return dist.argmin(dim=1).cpu().numpy()
+        else:
+            dist = (
+                (x ** 2).sum(1, keepdims=True)
+                - 2 * np.matmul(x, self.C_np)
+                + self.Cnorm_np
+            )
+            return np.argmin(dist, axis=1)
+
+    def to(self, device):
+        if device == "cpu":
+            self.C = self.C.cpu()
+            self.Cnorm = self.Cnorm.cpu()
+        elif torch.cuda.is_available():
+            self.C = self.C.to(device)
+            self.Cnorm = self.Cnorm.to(device)
+        return self
+
+    def feat2token(self, audio_feats):
+        """将音频特征量化为 token 列表"""
+        quantized_indices = self.__call__(audio_feats)
+        return quantized_indices.tolist()
+
+
 def extract_hubert_features_and_tokens(audio_path, device="cuda"):
     """
-    从 wav 文件提取 HuBERT 特征和量化 tokens
+    从 wav 文件提取 HuBERT 特征和量化 tokens。
+    
+    完整流程：
+    1. 加载 Chinese HuBERT 模型
+    2. 提取 layer 9 特征 (hidden_states[8])，HuBERT 原始输出约 50fps
+    3. 下采样 50fps → 10fps（线性插值）
+    4. 使用 K-means 模型将 layer9 特征量化为离散 tokens
     
     Args:
         audio_path: wav 文件路径
         device: 计算设备
     
     Returns:
-        audio_features: (T, 768) numpy array, HuBERT layer9 特征 (fps=10)
-        audio_tokens: list of int, 量化后的 audio tokens (fps=10)
+        audio_features: (T, 768) numpy array, HuBERT layer9 特征 @10fps
+        audio_tokens: list of int, K-means 量化后的 audio tokens @10fps
     """
     from transformers import Wav2Vec2FeatureExtractor, HubertModel
     
     project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     hubert_path = os.path.join(project_dir, "checkpoints", "chinese-hubert-base")
+    kmeans_path = os.path.join(project_dir, "checkpoints", "hubert_kmeans", "model.mdl")
     
-    print(f"[Audio] 加载 HuBERT 模型: {hubert_path}")
+    # ---- 1. 加载模型 ----
+    print(f"[Audio] 加载 Chinese HuBERT: {hubert_path}")
     feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(hubert_path)
-    model = HubertModel.from_pretrained(hubert_path).to(device).eval()
+    hubert_model = HubertModel.from_pretrained(hubert_path).to(device).eval()
     
-    # 读取音频
+    print(f"[Audio] 加载 K-means 量化器: {kmeans_path}")
+    kmeans = ApplyKmeans(kmeans_path).to(device)
+    
+    # ---- 2. 读取音频 ----
     wav, sr = sf.read(audio_path)
     if len(wav.shape) > 1:
-        wav = wav[:, 0]  # 转为单通道
+        wav = wav[:, 0]  # 多声道取第一个
+    # HuBERT 需要 16kHz
+    if sr != 16000:
+        import librosa
+        wav = librosa.resample(wav, orig_sr=sr, target_sr=16000)
     
-    # 提取特征
-    input_values = feature_extractor(wav, return_tensors="pt", sampling_rate=16000).input_values
-    input_values = input_values.to(device)
+    # ---- 3. 提取 HuBERT 特征 ----
+    input_values = feature_extractor(
+        wav, return_tensors="pt", sampling_rate=16000
+    ).input_values.to(device)
     
     with torch.no_grad():
-        outputs = model(input_values, output_hidden_states=True)
-        # Layer 9 特征用于 Mask Transformer
-        layer9_feat = outputs.hidden_states[9].squeeze(0).cpu().numpy()  # (T_hubert, 768)
-        # Last hidden state 用于量化 tokens
-        last_hidden = outputs.last_hidden_state.squeeze(0).cpu().numpy()  # (T_hubert, 768)
+        outputs = hubert_model(input_values, output_hidden_states=True)
+        # Layer 9 特征 (index 8 in hidden_states, 0-indexed after embedding layer)
+        audio_9layer = outputs.hidden_states[8].squeeze(0).cpu().numpy()  # (T_50fps, 768)
     
-    # HuBERT 输出约 50fps，需要下采样到 10fps (每5帧取1帧)
-    # 对于 layer9 特征: 取均值池化
-    hubert_fps = 50
-    target_fps = 10
-    ratio = hubert_fps // target_fps
+    print(f"[Audio] HuBERT layer9 原始特征: shape={audio_9layer.shape} (~50fps)")
     
-    n_frames = layer9_feat.shape[0] // ratio
-    audio_features = np.zeros((n_frames, layer9_feat.shape[1]), dtype=np.float32)
-    for i in range(n_frames):
-        start = i * ratio
-        end = min(start + ratio, layer9_feat.shape[0])
-        audio_features[i] = layer9_feat[start:end].mean(axis=0)
+    # ---- 4. 下采样 50fps → 10fps ----
+    audio_features_10fps = resample_fps_1d(audio_9layer, src_fps=50.0, tgt_fps=10.0)
+    print(f"[Audio] 下采样后特征: shape={audio_features_10fps.shape} (10fps)")
     
-    # 简单的量化：使用 K-means 近似 (这里用简化的 argmax 量化)
-    # 实际应使用 HuBERT 的量化器，这里用特征的主成分做简单量化
-    # 为简化, 我们使用 last_hidden 的 L2 norm 做 hash
-    audio_tokens = []
-    for i in range(n_frames):
-        start = i * ratio
-        end = min(start + ratio, last_hidden.shape[0])
-        feat = last_hidden[start:end].mean(axis=0)
-        # 简单哈希到 0-1023 范围
-        token = int(np.abs(feat).sum() * 1000) % 1024
-        audio_tokens.append(token)
+    # ---- 5. K-means 量化为 tokens ----
+    feats_tensor = torch.tensor(audio_features_10fps, dtype=torch.float32).to(device)
+    audio_tokens = kmeans.feat2token(feats_tensor)
     
-    print(f"[Audio] 特征提取完成: features={audio_features.shape}, tokens={len(audio_tokens)}")
+    print(f"[Audio] 特征提取完成: features={audio_features_10fps.shape}, tokens={len(audio_tokens)}")
     
-    del model, feature_extractor
+    # 清理显存
+    del hubert_model, feature_extractor
     torch.cuda.empty_cache()
     
-    return audio_features, audio_tokens
+    return audio_features_10fps.astype(np.float32), audio_tokens
 
 
 def main():
@@ -150,9 +214,9 @@ def main():
                         help="推理设备")
     
     # 生成参数
-    parser.add_argument("--temperature", type=float, default=0.5,
+    parser.add_argument("--temperature", type=float, default=0.2,
                         help="LLM 采样温度")
-    parser.add_argument("--top_p", type=float, default=0.4,
+    parser.add_argument("--top_p", type=float, default=0.2,
                         help="LLM top_p")
     parser.add_argument("--generate_steps", type=int, default=6,
                         help="Mask Transformer 生成步数")

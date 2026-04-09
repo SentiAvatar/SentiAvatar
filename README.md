@@ -144,21 +144,43 @@ All model weights are included in the `checkpoints/` directory. The full list:
 | `checkpoints/rvqvae/` | Residual VQ-VAE (body motion codec) | 754 MB |
 | `checkpoints/face_vqvae/` | Face VQ-VAE + weight matrices | 50 MB |
 | `checkpoints/chinese-hubert-base/` | Chinese HuBERT audio encoder | 361 MB |
+| `checkpoints/hubert_kmeans/` | HuBERT K-means quantizer (layer9 → tokens) | 1.5 MB |
 | `checkpoints/eval_model/` | ChronAccRet evaluation model | 434 MB |
 
 > **Note:** For Git LFS or HuggingFace hosting, see `checkpoints/README.md` for details.
 
 ## 🚀 Inference
 
+### Data Preprocessing (Required for Batch Mode)
+
+Before running batch inference, you need to preprocess the raw dataset to generate intermediate data:
+
+```bash
+# Preprocess all data (audio features + audio tokens + motion tokens)
+python scripts/preprocess_data.py --all --device cuda:0
+
+# Or separately:
+python scripts/preprocess_data.py --audio   # HuBERT features + K-means tokens
+python scripts/preprocess_data.py --motion  # RVQVAE motion tokens
+```
+
+This generates three directories under `data/`:
+- `audio_features_hubert_layer9_fps10/` — HuBERT layer9 features @10fps
+- `audio_tokens_hubert_layer9_fps10/` — K-means quantized audio tokens @10fps
+- `motion_token_data/` — RVQVAE encoded motion tokens (for GT comparison)
+
 ### Mode 1: Test Set Evaluation (Batch Mode)
 
 Run inference on the entire test set and generate BVH/JSON outputs:
 
 ```bash
-# Step 1: Start vLLM service (background)
+# Step 1: Preprocess data (if not done)
+python scripts/preprocess_data.py --all
+
+# Step 2: Start vLLM service (background)
 bash scripts/start_vllm_server.sh checkpoints/llm 8095 0
 
-# Step 2: Run batch inference
+# Step 3: Run batch inference
 bash scripts/run_test.sh 8095 0
 ```
 
@@ -172,7 +194,10 @@ Generate motion from your own audio + action tag:
 # Make sure vLLM service is running
 bash scripts/start_vllm_server.sh checkpoints/llm 8095 0
 
-# Run single inference
+# 🚀 Quick demo (uses built-in example audio, no extra data needed)
+bash scripts/run_single_infer.sh
+
+# Custom inference with your own audio
 bash scripts/run_single_infer.sh \
     --audio_path /path/to/your/audio.wav \
     --action_text "动作：点头微笑" \
@@ -237,8 +262,6 @@ bash scripts/run_eval.sh ./output/reconstructed 0
 | **R@K** | Text-motion retrieval recall @K | Higher ↑ |
 | **FID** | Fréchet Inception Distance | Lower ↓ |
 | **Diversity** | Generation diversity in latent space | Higher ↑ |
-| **BAS** | Beat Alignment Score | Lower ↓ |
-| **VOC** | Velocity-Onset Correlation | Higher ↑ |
 | **ESD** | Event Sync Distance (seconds) | Lower ↓ |
 
 ## 🔧 Motion Visualization
