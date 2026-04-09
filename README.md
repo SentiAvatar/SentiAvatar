@@ -135,7 +135,21 @@ pip install -r requirements.txt
 
 ## 📦 Model Checkpoints
 
-All model weights are included in the `checkpoints/` directory. The full list:
+Download all model weights from 🤗 HuggingFace:
+
+👉 **[https://huggingface.co/Chuhaojin/SentiAvatar](https://huggingface.co/Chuhaojin/SentiAvatar)**
+
+```bash
+# Option 1: Using git lfs
+git lfs install
+git clone https://huggingface.co/Chuhaojin/SentiAvatar checkpoints/
+
+# Option 2: Using huggingface-cli
+pip install huggingface_hub
+huggingface-cli download Chuhaojin/SentiAvatar --local-dir checkpoints/
+```
+
+Place the downloaded files into the `checkpoints/` directory. The expected structure:
 
 | Model | Description | Size |
 |-------|-------------|------|
@@ -146,8 +160,6 @@ All model weights are included in the `checkpoints/` directory. The full list:
 | `checkpoints/chinese-hubert-base/` | Chinese HuBERT audio encoder | 361 MB |
 | `checkpoints/hubert_kmeans/` | HuBERT K-means quantizer (layer9 → tokens) | 1.5 MB |
 | `checkpoints/eval_model/` | ChronAccRet evaluation model | 434 MB |
-
-> **Note:** For Git LFS or HuggingFace hosting, see `checkpoints/README.md` for details.
 
 ## 🚀 Inference
 
