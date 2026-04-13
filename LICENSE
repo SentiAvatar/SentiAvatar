@@ -1,26 +1,103 @@
-Creative Commons Attribution-NonCommercial 4.0 International License (CC BY-NC 4.0)
+SentiPulse Non-Commercial Source License v1.0
 
-Copyright (c) 2026 Chuhao Jin
+Copyright (c) 2026
+山东思维光谱科技发展有限公司
+Shandong SentiPulse Technology Development Co., Ltd.
 
-This work is licensed under the Creative Commons Attribution-NonCommercial 4.0
-International License. To view a copy of this license, visit
-http://creativecommons.org/licenses/by-nc/4.0/ or send a letter to
-Creative Commons, PO Box 1866, Mountain View, CA 94042, USA.
+This License governs the use, reproduction, modification, and distribution
+of the software, source code, model weights, datasets, documentation, and
+other related materials (collectively, the "Licensed Materials").
 
-You are free to:
-  - Share — copy and redistribute the material in any medium or format
-  - Adapt — remix, transform, and build upon the material
+1. Grant of Rights
 
-Under the following terms:
-  - Attribution — You must give appropriate credit, provide a link to the
-    license, and indicate if changes were made. You may do so in any
-    reasonable manner, but not in any way that suggests the licensor
-    endorses you or your use.
-  - NonCommercial — You may not use the material for commercial purposes.
-  - No additional restrictions — You may not apply legal terms or
-    technological measures that legally restrict others from doing
-    anything the license permits.
+Subject to the terms and conditions of this License, the Licensor hereby
+grants you a non-exclusive, worldwide, royalty-free license to:
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+a) Use the Licensed Materials for non-commercial purposes only;
+b) Copy and reproduce the Licensed Materials;
+c) Modify, adapt, and create derivative works of the Licensed Materials;
+d) Distribute the Licensed Materials or derivative works, provided that
+   such distribution is also non-commercial and complies with this License.
+
+2. Non-Commercial Use Only
+
+You may not use the Licensed Materials, in whole or in part, for any
+commercial purpose.
+
+For the avoidance of doubt, "commercial purpose" includes, but is not
+limited to:
+
+a) Use by or on behalf of a for-profit entity;
+b) Use in products, services, or systems that generate revenue, fees,
+   subscriptions, or other consideration, whether directly or indirectly;
+c) Use as part of a hosted service, SaaS offering, API service, or
+   cloud-based platform;
+d) Use in internal business operations, production systems, or
+   decision-making processes of a commercial organization;
+e) Use in connection with advertising, marketing, or monetization activities.
+
+Any use not expressly permitted under this License shall be deemed
+commercial use.
+
+3. Attribution
+
+You must provide appropriate attribution in any distribution or public use
+of the Licensed Materials or derivative works, including:
+
+a) The name of the Licensor;
+b) A reference to this License; and
+c) An indication of any modifications made.
+
+Attribution must not imply endorsement by the Licensor.
+
+4. Distribution Conditions
+
+If you distribute the Licensed Materials or derivative works:
+
+a) You must include a copy of this License;
+b) You must not impose any additional legal or technical restrictions;
+c) You must clearly state that the materials are licensed for
+   non-commercial use only.
+
+5. No Open Source Grant
+
+This License does not grant rights under any open source license and shall
+not be construed as an open source license. The Licensed Materials are
+source-available but not open source.
+
+6. Commercial Licensing
+
+Commercial use of the Licensed Materials requires a separate written
+commercial license agreement with the Licensor.
+
+For commercial licensing inquiries, please contact:
+legal@sentipulse.com
+
+7. No Trademark Rights
+
+This License does not grant permission to use the Licensor’s trademarks,
+logos, or brand identifiers.
+
+8. Disclaimer of Warranty
+
+THE LICENSED MATERIALS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
+
+9. Limitation of Liability
+
+IN NO EVENT SHALL THE LICENSOR BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING
+FROM, OUT OF, OR IN CONNECTION WITH THE LICENSED MATERIALS OR THE USE OR
+OTHER DEALINGS IN THE LICENSED MATERIALS.
+
+10. Termination
+
+This License shall automatically terminate if you breach any of its terms.
+Upon termination, you must cease all use and distribution of the Licensed
+Materials.
+
+11. Governing Law
+
+This License shall be governed by and construed in accordance with the laws
+of the People's Republic of China, excluding its conflict of law principles.
