@@ -5,7 +5,7 @@
 # SentiAvatar: Towards Expressive and Interactive Digital Humans
 <p align="center">
   <a href="https://arxiv.org/abs/2604.02908"><img src="https://img.shields.io/badge/arXiv-2604.02908-b31b1b.svg" alt="arXiv"></a>
-  <a href="#license"><img src="https://img.shields.io/badge/License-SentiPulsei%20--NC%201.0-lightgrey.svg" alt="License"></a>
+  <a href="#license"><img src="https://img.shields.io/badge/License-SentiPulse%20--NC%201.0-lightgrey.svg" alt="License"></a>
   <a href="#dataset"><img src="https://img.shields.io/badge/Dataset-SuSuInterActs-blue.svg" alt="Dataset"></a>
 </p>
 
