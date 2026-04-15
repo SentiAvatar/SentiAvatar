@@ -340,7 +340,7 @@ If you find this work useful, please cite our paper:
 
 ## 🙏 Acknowledgments
 
-We thank the following open-source projects:
+We also hank the following open-source projects:
 
 - [vLLM](https://github.com/vllm-project/vllm) — High-throughput LLM inference engine
 - [HuggingFace Transformers](https://github.com/huggingface/transformers) — Pre-trained model framework
