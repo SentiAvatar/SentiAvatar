@@ -341,7 +341,7 @@ If you find this work useful, please cite our paper:
 ## 🙏 Acknowledgments
 The authors would like to sincerely thank all collaborators for their valuable contributions to this work. In particular, special thanks to Shi Xueliang and Pan Xuanyue for leading the art design and data production efforts. The project also benefited greatly from the contributions of team members: Shi Xueliang, Yu Yongchang, and Li Xing in art design; Pan Xuanyue, Li Huixian, Yang Yijia, Zhang Wenxuan, and Wang Wei (UE) in data production. Their dedicated work and collaboration were essential to the successful completion of this research.
 
-We also hank the following open-source projects:
+We also thank the following open-source projects:
 
 - [vLLM](https://github.com/vllm-project/vllm) — High-throughput LLM inference engine
 - [HuggingFace Transformers](https://github.com/huggingface/transformers) — Pre-trained model framework
