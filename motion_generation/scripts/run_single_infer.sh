@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 # ============================================================
 # 单条样本推理脚本 (Single Case Inference)
 #
@@ -18,7 +19,7 @@
 #       --output_dir ./output_single
 # ============================================================
 
-PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+PROJECT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 
 export TRANSFORMERS_OFFLINE=1
 export HF_HUB_OFFLINE=1

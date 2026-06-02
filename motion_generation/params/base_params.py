@@ -33,8 +33,8 @@ class SamplingParams:
 
 @dataclass
 class ComplParams:
-    infill_ckpt: str = "/data/public/chuhao_share/ckpt/mocap_mask_transformer/outputs_train_1110step4_jch/checkpoint-47600"
-    tmr_model: str = "/data/public/chuhao_share/ckpt/clip-vit-base-patch32"
+    infill_ckpt: str = "checkpoints/mask_transformer"
+    tmr_model: str = "checkpoints/eval_model"
 
 @dataclass
 class BaseConfig:
@@ -48,11 +48,11 @@ class ServiceURL:
 
 @dataclass
 class CkptParams:
-    base_path: str = f"/data/public/chuhao_share/ckpt"
-    motion_infll_model_path: str= "mocap_mask_transformer/outputs_train_1110step4_jch/checkpoint-47600"
-    text_model_path: str = "clip-vit-base-patch32"
-    face_vq_ckpt_file: str = "pytorch_model_face_fad2cl_1209_codesize2048_codelength512.bin" # 0feats token = 
-    face_infill_model_path: str = "InfillMotionTransformer_for_face/1209/checkpoint-102500"
+    base_path: str = "checkpoints"
+    motion_infll_model_path: str= "mask_transformer"
+    text_model_path: str = "eval_model"
+    face_vq_ckpt_file: str = "face_vqvae/pytorch_model_face_fad2cl_1209_codesize2048_codelength512.bin" # 0feats token = 
+    face_infill_model_path: str = "face_infill_transformer"
     audo_emb_model_path :str = "chinese-hubert-base"
     motion_vq_name: str = "VQVAE_nb_code2048_down_t1_qdp0.8_num_quantizers1_add_2CNN"
     motion_vq_dataset_name: str = "mocap_pyramid_1016_fix_dict_bug"

@@ -172,6 +172,34 @@ class AudioMotionTransformer(PreTrainedModel):
         # Initialize weights
         self.post_init()
 
+    def _valid_token_mask(self, seq_len, device):
+        """Valid residual-codebook tokens for each flattened frame position."""
+        ntpf = int(self.config.num_tokens_per_frame)
+        codebook_size = int(self.config.codebook_size)
+        vocab_size = int(self.config.vocab_size)
+        quantizer_idx = torch.arange(seq_len, device=device) % ntpf
+        lows = quantizer_idx.unsqueeze(1) * codebook_size
+        highs = lows + codebook_size
+        token_ids = torch.arange(vocab_size, device=device).unsqueeze(0)
+        return (token_ids >= lows) & (token_ids < highs)
+
+    def _mask_invalid_logits(self, logits):
+        """Prevent a position from predicting another quantizer's code range."""
+        valid_mask = self._valid_token_mask(logits.size(1), logits.device).unsqueeze(0)
+        return logits.masked_fill(~valid_mask, torch.finfo(logits.dtype).min)
+
+    def _validate_raw_frame_tokens(self, frame, label):
+        ntpf = int(self.config.num_tokens_per_frame)
+        codebook_size = int(self.config.codebook_size)
+        if len(frame) != ntpf:
+            raise ValueError(f"{label} has {len(frame)} residual IDs, expected {ntpf}")
+        for idx, value in enumerate(frame):
+            value = int(value)
+            if value < 0 or value >= codebook_size:
+                raise ValueError(
+                    f"{label} residual {idx + 1}={value} is outside [0, {codebook_size - 1}]"
+                )
+
     def _fuse_audio(self, token_embeddings, audio_features):
         """
         将音频特征融合到motion token embedding上。
@@ -185,6 +213,16 @@ class AudioMotionTransformer(PreTrainedModel):
             (batch_size, seq_len, hidden_size) - 融合后的embedding
         """
         num_tokens_per_frame = self.config.num_tokens_per_frame
+        expected_frames = token_embeddings.size(1) // num_tokens_per_frame
+        if audio_features.dim() != 3:
+            raise ValueError(
+                f"audio_features must have shape (B,T,D), got {tuple(audio_features.shape)}"
+            )
+        if audio_features.size(1) != expected_frames:
+            raise ValueError(
+                f"audio feature length {audio_features.size(1)} does not match "
+                f"motion window length {expected_frames}"
+            )
 
         # 投影音频特征: (B, num_frames, hidden_size)
         audio_emb = self.audio_encoder(audio_features)
@@ -232,12 +270,13 @@ class AudioMotionTransformer(PreTrainedModel):
         if labels is None:
             return logits
 
-        # Calculate loss (only on masked positions, labels=-100 for non-masked)
+        # Calculate loss only over the code range valid for each residual position.
+        constrained_logits = self._mask_invalid_logits(logits)
         loss_fn = nn.CrossEntropyLoss(ignore_index=-100, reduction="mean")
-        loss = loss_fn(logits.view(-1, logits.size(-1)), labels.view(-1))
+        loss = loss_fn(constrained_logits.view(-1, constrained_logits.size(-1)), labels.view(-1))
 
         with torch.no_grad():
-            preds = logits.argmax(dim=-1)
+            preds = constrained_logits.argmax(dim=-1)
             # Only compute accuracy on non-ignored positions
             valid_mask = labels != -100
             if valid_mask.sum() > 0:
@@ -286,12 +325,15 @@ class AudioMotionTransformer(PreTrainedModel):
         if total_masks == 0:
             return step_out
 
+        generate_steps = max(1, int(generate_steps))
         masks_per_step = max(1, total_masks // generate_steps)
 
         for step in range(generate_steps):
             logits = self.forward(step_out, audio_features=audio_features)
-            # logits: (B, seq_len, vocab_size)
-            preds_probs, preds_index = logits.max(dim=-1)
+            logits = self._mask_invalid_logits(logits)
+            # Compare positions by normalized confidence, not raw logit scale.
+            probs = torch.softmax(logits, dim=-1)
+            preds_probs, preds_index = probs.max(dim=-1)
 
             for b in range(batch_size):
                 remaining = mask_positions[b]
@@ -313,34 +355,38 @@ class AudioMotionTransformer(PreTrainedModel):
 
         return step_out
 
-    def interpolate(self, motion_frame1, motion_frame5, audio_features_5frames):
+    def interpolate(self, motion_frame1, motion_frame5, audio_features_5frames, generate_steps=1):
         """
-        插帧推理接口：给定第1帧和第5帧的motion token，以及5帧的audio特征，
-        预测中间3帧的motion token。
+        插帧推理接口：给定窗口首尾motion token和对应窗口audio特征，
+        预测中间帧motion token。
 
         Args:
             motion_frame1: list of 4 ints - 第1帧的4个motion token (raw, 0~511)
-            motion_frame5: list of 4 ints - 第5帧的4个motion token (raw, 0~511)
-            audio_features_5frames: (5, 768) numpy array or tensor - 5帧的hubert特征
+            motion_frame5: list of 4 ints - 末帧的4个motion token (raw, 0~511)
+            audio_features_5frames: (num_frames, 768) numpy array or tensor - 对齐窗口的hubert特征
+            generate_steps: int - step-by-step mask refinement steps
         Returns:
-            list of lists - 5帧的motion tokens [[frame1], [frame2], [frame3], [frame4], [frame5]]
+            list of lists - num_frames帧的motion tokens
                 每个frame是4个raw token (0~511)
         """
         mask_token_id = self.config.vocab_size - 1  # 2048
         ntpf = self.config.num_tokens_per_frame
         codebook_size = self.config.codebook_size
+        num_frames = self.config.num_frames
 
         # offset: [0, 512, 1024, 1536]
         offsets = [codebook_size * i for i in range(ntpf)]
+        self._validate_raw_frame_tokens(motion_frame1, "motion_frame1")
+        self._validate_raw_frame_tokens(motion_frame5, "motion_frame5")
 
         input_tokens = []
         # Frame 1 (known)
         for j in range(ntpf):
             input_tokens.append(motion_frame1[j] + offsets[j])
-        # Frames 2, 3, 4 (masked)
-        for _ in range(3 * ntpf):
+        # Interior frames (masked)
+        for _ in range((num_frames - 2) * ntpf):
             input_tokens.append(mask_token_id)
-        # Frame 5 (known)
+        # Last frame (known)
         for j in range(ntpf):
             input_tokens.append(motion_frame5[j] + offsets[j])
 
@@ -351,15 +397,20 @@ class AudioMotionTransformer(PreTrainedModel):
             audio_features_5frames = torch.tensor(
                 audio_features_5frames, dtype=torch.float32
             )
+        if audio_features_5frames.dim() != 2 or audio_features_5frames.size(0) != num_frames:
+            raise ValueError(
+                f"audio_features_5frames must have shape ({num_frames}, D), "
+                f"got {tuple(audio_features_5frames.shape)}"
+            )
         audio_feat = audio_features_5frames.unsqueeze(0).to(device)
 
         # Generate
-        output = self.generate_sbs(input_ids, audio_feat, generate_steps=1)
+        output = self.generate_sbs(input_ids, audio_feat, generate_steps=generate_steps)
         output = output[0].cpu().tolist()
 
         # Parse output into frames
         frames = []
-        for f in range(self.config.num_frames):
+        for f in range(num_frames):
             frame_tokens = []
             for j in range(ntpf):
                 token_id = output[f * ntpf + j]

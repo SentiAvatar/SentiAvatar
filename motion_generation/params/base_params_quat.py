@@ -34,8 +34,8 @@ class SamplingParams:
 
 @dataclass
 class ComplParams:
-    infill_ckpt: str = "/data/home/jinch/projects/susu_avatar_training/ckpt/Motion_mask_transformer_mocap_ckpt/outputs_train_susu_avatar0109step4_jch/checkpoint-8000"
-    tmr_model: str = "/data/home/jinch/projects/susu_avatar_training/ckpt/clip-vit-base-patch32/"
+    infill_ckpt: str = "checkpoints/mask_transformer"
+    tmr_model: str = "checkpoints/eval_model"
 
 @dataclass
 class BaseConfig:
@@ -50,9 +50,9 @@ class ServiceURL:
 
 @dataclass
 class CkptParams:
-    base_path: str = f"/data/home/jinch/projects/susu_avatar_training/ckpt"
-    motion_infll_model_path: str= "Motion_mask_transformer_mocap_ckpt/outputs_train_susu_avatar0109step4_jch/checkpoint-8000"
-    text_model_path: str = "clip-vit-base-patch32"
-    face_vq_ckpt_file: str = "pytorch_model_face_fad2cl_1209_codesize2048_codelength512.bin" # 0feats token = 
-    face_infill_model_path: str = "InfillMotionTransformer_for_face/1209/checkpoint-102500"
+    base_path: str = "checkpoints"
+    motion_infll_model_path: str= "mask_transformer"
+    text_model_path: str = "eval_model"
+    face_vq_ckpt_file: str = "face_vqvae/pytorch_model_face_fad2cl_1209_codesize2048_codelength512.bin" # 0feats token = 
+    face_infill_model_path: str = "face_infill_transformer"
     audo_emb_model_path :str = "chinese-hubert-base"

@@ -100,7 +100,7 @@ Each `.npy` file is a dictionary:
 ```json
 {
     "path/to/sample_name": "【表情：认真聆听】【动作：缓慢点头】嗯嗯，这样啊...",
-    ...
+    "path/to/structured_sample": {"expression": "开心", "action": "挥手", "dialogue": "你好"}
 }
 ```
 
@@ -181,6 +181,10 @@ This generates three directories under `data/`:
 - `audio_tokens_hubert_layer9_fps10/` — K-means quantized audio tokens @10fps
 - `motion_token_data/` — RVQVAE encoded motion tokens (for GT comparison)
 
+When matching `motion_data` and an RVQVAE checkpoint are available, audio preprocessing resamples HuBERT features to the RVQVAE motion-token length before K-means quantization. This keeps GitHub inference, LLM planner data, and Infill Transformer windows on the same 10fps timeline; use `--overwrite` to refresh old preprocessed files and `--no_align_audio_to_motion` only for audio-only preprocessing.
+`split/all_file_list.txt` is optional; preprocessing falls back to train/val/test splits or directory discovery.
+Planner JSONL building and Infill training fail fast if audio and motion token lengths differ; set `LENGTH_MISMATCH_POLICY=truncate` only for explicit legacy-data audits.
+
 ### Mode 1: Test Set Evaluation (Batch Mode)
 
 Run inference on the entire test set and generate BVH/JSON outputs:
@@ -190,7 +194,7 @@ Run inference on the entire test set and generate BVH/JSON outputs:
 python scripts/preprocess_data.py --all
 
 # Step 2: Start vLLM service (background)
-bash scripts/start_vllm_server.sh checkpoints/llm 8095 0
+MAX_MODEL_LEN=2400 MAX_TOKENS_LIMIT=2400 bash scripts/start_vllm_server.sh checkpoints/llm 8095 0
 
 # Step 3: Run batch inference
 bash scripts/run_test.sh 8095 0
@@ -204,7 +208,7 @@ Generate motion from your own audio + action tag:
 
 ```bash
 # Make sure vLLM service is running
-bash scripts/start_vllm_server.sh checkpoints/llm 8095 0
+MAX_MODEL_LEN=2400 MAX_TOKENS_LIMIT=2400 bash scripts/start_vllm_server.sh checkpoints/llm 8095 0
 
 # 🚀 Quick demo (uses built-in example audio, no extra data needed)
 bash scripts/run_single_infer.sh
@@ -223,13 +227,21 @@ python single_case_infer.py \
     --audio_path /path/to/audio.wav \
     --action_text "动作：挥手打招呼" \
     --output_dir ./output_single \
-    --vllm_port 8095
+    --vllm_port 8095 \
+    --mask_ckpt checkpoints/mask_transformer \
+    --rvqvae_ckpt checkpoints/rvqvae/model/epoch_30.pth \
+    --hubert_path checkpoints/chinese-hubert-base \
+    --kmeans_path checkpoints/hubert_kmeans/model.mdl
 ```
+
+Planner inference is strict by default: the LLM must emit the same number of sparse keyframes requested by the sampled audio tokens, and `[len_N]` must match the parsed residual groups. Single-case inference also checks HuBERT token/feature length and Mask/RVQVAE token compatibility before decoding. Use `--keyframe_len_policy warn` for legacy checkpoints. For longer utterances, raise server-side `MAX_MODEL_LEN`/`MAX_TOKENS_LIMIT` and client-side `--llm_max_tokens`.
 
 **Output files:**
 - `<name>.bvh` — BVH motion file (viewable in Blender)
 - `<name>.json` — Animation data (UE engine format)
 - `<name>.wav` — Corresponding audio file
+- `<name>_audio_tokens.json` / `<name>_audio_features.npy` / `<name>_motion_tokens.json` — reusable previous-turn context for continuation
+- `<name>_pipeline_result.json` — sparse/dense token plan, timing, and artifact paths
 
 ## 📊 Experimental Results
 
@@ -268,6 +280,20 @@ Evaluate generated motion quality using our ChronAccRet evaluation model:
 bash scripts/run_eval.sh ./output/reconstructed 0
 ```
 
+`run_eval.sh` now fails fast when required paths or evaluation dependencies are missing. Use `MOTION2TEXT_PATH`, `WAV_DIR`, `EVAL_MODEL_PATH`, `STATS_DIR`, `GT_MOTION_DIR`, `REAL_GT_MOTION_DIR`, `TEXT_MODEL_NAME`, and `OUTPUT_DIR` to evaluate outputs outside the default `data/` and `checkpoints/` layout.
+
+For BEATv2-style FGD/BC/Diversity checks on reconstructed `*_pred.npy` / `*_gt.npy` files:
+
+```bash
+python scripts/eval_beatv2_metrics.py \
+    --pred_dir output/reconstructed \
+    --gt_dir output/reconstructed \
+    --wav_dir data/wav_data \
+    --output_json output/eval_results/beatv2_metrics.json
+```
+
+The default FGD/Diversity features are deterministic handcrafted statistics for regression tests. Use `--feature_model_path <torchscript.pt>` for official or project-specific gesture embeddings.
+
 **Metrics:**
 | Metric | Description | Better |
 |--------|-------------|--------|
@@ -299,6 +325,101 @@ python tools/visualize_motion.py \
     --save_json
 ```
 
+## 🔁 Training / Reproduction
+
+Training entry points are provided for the GitHub-compatible pipeline:
+
+```bash
+# CPU synthetic smoke tests for train/load compatibility; do not require SuSuInterActs.
+python scripts/smoke_reproduction.py --work_dir /tmp/sentiavatar_smoke_auto
+# Also covers offline Motion Foundation -> planner SFT with a tiny local CausalLM.
+python scripts/smoke_reproduction.py --work_dir /tmp/sentiavatar_smoke_auto_llm --include_llm_train
+
+# Print the full real-data reproduction plan without executing long training.
+python scripts/reproduce_pipeline.py --list_stages
+python scripts/reproduce_pipeline.py --stages all
+
+# After training, start vLLM and run a small inference/eval pass.
+MAX_MODEL_LEN=2400 MAX_TOKENS_LIMIT=2400 bash scripts/start_vllm_server.sh checkpoints_train/llm 8095 0
+python scripts/reproduce_pipeline.py \
+    --run \
+    --skip_existing \
+    --stages infer-batch,reconstruct-batch,eval-sync \
+    --vllm_url http://localhost:8095 \
+    --infer_max_samples 8 \
+    --eval_max_samples 8
+
+# Use --skip_face for body-only ablations or datasets without ARKit face data.
+python scripts/reproduce_pipeline.py --run --skip_face --stages train-rvqvae,preprocess,train-body-infill
+
+# Audit real data/checkpoint layout after preprocessing and before training/inference.
+python scripts/audit_reproduction_data.py \
+    --data_dir data \
+    --require_preprocessed \
+    --check_face \
+    --rvqvae_ckpt checkpoints_train/susuinteracts/rvqvae_body/model/latest.pth \
+    --mask_ckpt checkpoints_train/mask_transformer \
+    --motion_foundation_dir checkpoints_train/motion_foundation \
+    --llm_dir checkpoints_train/llm \
+    --face_rvqvae_ckpt checkpoints_train/face_rvqvae/latest.pth \
+    --face_infill_ckpt checkpoints_train/face_infill_transformer
+
+# Audit also checks that body/face RVQVAE and Infill checkpoints share the
+# same residual-token width, codebook size, vocab size, and planner step.
+# Pass --num_body_quantizers/--body_codebook_size and
+# --num_face_quantizers/--face_codebook_size for non-default codec settings.
+# It also verifies that the LLM planner tokenizer covers planner tokens
+# like [audio_*], [res1_*]...[res4_*], [len_*], and [step_*] atomically.
+
+# Lightweight sync-only evaluation after reconstruction; no ChronTMR model required.
+python scripts/eval_sync_metrics.py \
+    --motion_dir output/reconstructed \
+    --wav_dir data/wav_data \
+    --motion_type pred \
+    --output_json output/eval_results/sync_metrics.json
+```
+
+```bash
+# 1) Train Motion R-VQVAE
+CODEBOOK_SIZE=512 NUM_QUANTIZERS=4 bash scripts/train_rvqvae.sh
+# Optional codec structure overrides are saved to opt.txt:
+# DOWN_T=1 STRIDE_T=2 WIDTH=512 DEPTH=3 CODE_DIM=512 bash scripts/train_rvqvae.sh
+
+# 2) Build motion/audio tokens with the trained RVQVAE
+bash scripts/preprocess_data.sh --all \
+    --rvqvae_ckpt checkpoints_train/susuinteracts/rvqvae_body/model/latest.pth \
+    --hubert_path checkpoints/chinese-hubert-base \
+    --kmeans_path checkpoints/hubert_kmeans/model.mdl \
+    --overwrite \
+    --strict
+
+# This aligns HuBERT features/tokens to the trained RVQVAE token length by default.
+# CPU-only smoke/debug runs fall back to CPU when --device cuda:* is requested.
+
+# 3) Pre-train / fine-tune the LLM motion planner
+bash scripts/build_motion_foundation_dataset.sh
+# Motion Foundation JSONL uses raw motion2text descriptions by default.
+# For the paper-scale 200K+ mix, pass FOUNDATION_MANIFEST_JSON=/path/foundation_manifest.json.
+# Then train with TRAIN_JSONL=data/llm_sft/foundation_step1.jsonl if pre-training from base Qwen.
+bash scripts/build_llm_sft_dataset.sh
+# Planner SFT uses extracted action labels plus sparse audio tokens by default.
+# scripts/reproduce_pipeline.py defaults to --planner_sft_mix both to include continuation SFT rows.
+CODEBOOK_SIZE=512 NUM_QUANTIZERS=4 MAX_AUDIO_TOKEN=2048 MAX_LEN_TOKEN=2048 STEP_TOKENS=1,2,3,4,5,6,8 MAX_LENGTH=1600 bash scripts/train_llm_planner.sh
+# MAX_AUDIO_TOKEN must cover K-means IDs; MAX_LEN_TOKEN must cover [len_N].
+
+# 4) Train the audio-aware Infill Transformer
+CODEBOOK_SIZE=512 NUM_TOKENS_PER_FRAME=4 bash scripts/train_infill_transformer.sh
+# Default RANDOM_REPLACE_SCOPE=unmasked matches the paper's Infill training.
+# For paper step ablations, train with --num_frames t+1 and infer with --step t.
+
+# 5) Train the paper-style face tokenizer and Face Infill Transformer
+CODEBOOK_SIZE=512 NUM_QUANTIZERS=2 bash scripts/train_face_rvqvae.sh
+bash scripts/preprocess_face_tokens.sh
+CODEBOOK_SIZE=512 NUM_TOKENS_PER_FRAME=2 bash scripts/train_face_infill_transformer.sh
+```
+
+See [`docs/reproduction.md`](docs/reproduction.md) for the paper-to-code mapping, checkpoint layout, inference handoff, and current face-path fidelity notes.
+
 ## 🏗️ Project Structure
 
 ```
@@ -308,6 +429,7 @@ SentiAvatar/
 │   ├── single_case_infer.py    #    Single-case inference script
 │   ├── reconstruct_from_tokens.py  # Token → BVH/JSON decoder
 │   ├── vllm_server.py          #    vLLM server for LLM inference
+│   ├── training/               #    Trainable RVQVAE, planner, and infill scripts
 │   ├── models/                 #    Model definitions (RVQVAE, Mask Transformer)
 │   ├── actions/                #    Post-processing (BVH/JSON conversion)
 │   ├── utils/                  #    Utilities and rotation tools

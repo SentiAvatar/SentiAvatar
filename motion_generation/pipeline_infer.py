@@ -50,6 +50,7 @@ import random
 # 确保能导入本地模块
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from models.audio_motion_model import AudioMotionTransformer, AudioMotionConfig
+from training.data import extract_action_text as extract_motion_action_text, normalize_motion_text
 
 
 # ======================================================================
@@ -137,13 +138,12 @@ class VLLMClient:
         for i, (text, motion) in enumerate(result["motion_sequence_list"]):
             # 解析 LLM 输出
             motion_clean = motion.replace("[res_", "[res")
-            # 尝试按 [step_4] 或 [STEP_4] 分割，取最后一段
+            # Take the completion after the last [step_t] marker so echoed
+            # prompt/prefix tokens do not pollute the sparse keyframe plan.
             motion_sequence = motion_clean
-            for sep in ["[step_4]", "[STEP_4]", "[step_1]", "[STEP_1]"]:
-                if sep.lower() in motion_sequence.lower():
-                    idx = motion_sequence.lower().rfind(sep.lower())
-                    motion_sequence = motion_sequence[idx + len(sep):]
-                    break
+            step_matches = list(re.finditer(r"\[step_(\d+)\]", motion_sequence, flags=re.IGNORECASE))
+            if step_matches:
+                motion_sequence = motion_sequence[step_matches[-1].end():]
 
             parsed = extract_mids_from_string(motion_sequence)
             full_parsed = extract_mids_from_string(motion_clean)
@@ -256,12 +256,81 @@ def sparse_to_keyframes(motion_tokens_dict):
     return keyframes
 
 
+def validate_motion_token_frames(frames, num_tokens_per_frame, codebook_size, context="motion tokens"):
+    """Fail early when LLM or infill tokens cannot be decoded by the RVQVAE."""
+    for frame_idx, frame in enumerate(frames):
+        if len(frame) != num_tokens_per_frame:
+            raise ValueError(
+                f"{context}: frame {frame_idx} has {len(frame)} residual IDs, "
+                f"expected {num_tokens_per_frame}"
+            )
+        for q_idx, value in enumerate(frame):
+            value = int(value)
+            if value < 0 or value >= codebook_size:
+                raise ValueError(
+                    f"{context}: frame {frame_idx} residual {q_idx + 1}={value} "
+                    f"is outside [0, {codebook_size - 1}]"
+                )
+
+
+def validate_audio_inputs(audio_tokens, audio_features, audio_feat_dim, context="audio inputs"):
+    """Check prompt-time audio tokens and infill-time HuBERT features share one timeline."""
+    if audio_features is None:
+        raise ValueError(f"{context}: audio_features is required")
+    audio_features = np.asarray(audio_features)
+    if audio_features.ndim != 2 or audio_features.shape[1] != int(audio_feat_dim):
+        raise ValueError(
+            f"{context}: expected audio_features shape (T,{audio_feat_dim}), "
+            f"got {audio_features.shape}"
+        )
+    if len(audio_tokens) != audio_features.shape[0]:
+        raise ValueError(
+            f"{context}: audio token length {len(audio_tokens)} does not match "
+            f"audio feature length {audio_features.shape[0]}"
+        )
+    for idx, token in enumerate(audio_tokens):
+        if isinstance(token, list):
+            if len(token) != 1:
+                raise ValueError(f"{context}: audio token {idx} has nested width {len(token)}, expected 1")
+            token = token[0]
+        if not isinstance(token, (int, np.integer)):
+            raise ValueError(f"{context}: audio token {idx} is not an integer: {token!r}")
+
+
+def validate_planner_keyframe_count(
+    num_keyframes,
+    expected_keyframes,
+    reported_total_len=None,
+    policy="strict",
+    context="LLM planner",
+):
+    """Check that sparse LLM output matches the prompt-time keyframe contract."""
+    mismatches = []
+    if reported_total_len is not None and int(reported_total_len) != int(num_keyframes):
+        mismatches.append(
+            f"reported [len_{reported_total_len}] but parsed {num_keyframes} keyframes"
+        )
+    if expected_keyframes is not None and int(num_keyframes) != int(expected_keyframes):
+        mismatches.append(
+            f"expected {expected_keyframes} keyframes from sampled audio tokens, got {num_keyframes}"
+        )
+    if not mismatches:
+        return False
+    message = f"{context}: " + "; ".join(mismatches)
+    if policy == "strict":
+        raise ValueError(message)
+    if policy == "warn":
+        print(f"  [WARN] {message}")
+        return True
+    raise ValueError(f"Unsupported keyframe length policy: {policy}")
+
+
 def interpolate_sequence(model, keyframe_tokens, audio_features, generate_steps=6):
     """
     使用 Mask Transformer 对稀疏关键帧进行滑动窗口插帧。
 
-    每个窗口包含 5 帧：frame1(已知) + frame2,3,4(mask) + frame5(已知)，
-    模型预测中间 3 帧的 motion token。
+    每个窗口包含 num_frames 帧：首尾帧已知，中间帧 mask。
+    默认模型 num_frames=5，对应论文主实验 step t=4。
 
     Args:
         model: AudioMotionTransformer 模型
@@ -274,13 +343,17 @@ def interpolate_sequence(model, keyframe_tokens, audio_features, generate_steps=
     """
     ntpf = model.config.num_tokens_per_frame
     codebook_size = model.config.codebook_size
+    num_frames = int(model.config.num_frames)
+    keyframe_step = num_frames - 1
     offsets = [codebook_size * i for i in range(ntpf)]
     mask_token_id = model.config.vocab_size - 1
     device = next(model.parameters()).device
 
     num_keyframes = len(keyframe_tokens)
     if num_keyframes < 2:
+        validate_motion_token_frames(keyframe_tokens, ntpf, codebook_size, context="LLM keyframes")
         return keyframe_tokens
+    validate_motion_token_frames(keyframe_tokens, ntpf, codebook_size, context="LLM keyframes")
 
     all_output_frames = []
 
@@ -288,18 +361,18 @@ def interpolate_sequence(model, keyframe_tokens, audio_features, generate_steps=
         frame1_tokens = keyframe_tokens[i]
         frame5_tokens = keyframe_tokens[i + 1]
 
-        # 构建 5 帧窗口输入: frame1(4 tokens) + mask(12 tokens) + frame5(4 tokens)
+        # 构建窗口输入: 首帧 tokens + 中间 mask + 末帧 tokens
         input_tokens = []
         for j in range(ntpf):
             input_tokens.append(frame1_tokens[j] + offsets[j])
-        for _ in range(3 * ntpf):
+        for _ in range((num_frames - 2) * ntpf):
             input_tokens.append(mask_token_id)
         for j in range(ntpf):
             input_tokens.append(frame5_tokens[j] + offsets[j])
 
-        # 获取对应 5 帧的 audio 特征
-        start_audio_idx = i * 4
-        end_audio_idx = start_audio_idx + 5
+        # 获取对应窗口的 audio 特征
+        start_audio_idx = i * keyframe_step
+        end_audio_idx = start_audio_idx + num_frames
         if end_audio_idx <= audio_features.shape[0]:
             window_audio = audio_features[start_audio_idx:end_audio_idx]
         else:
@@ -307,15 +380,15 @@ def interpolate_sequence(model, keyframe_tokens, audio_features, generate_steps=
             if start_audio_idx >= audio_features.shape[0]:
                 # 完全超出范围，用最后一帧填充
                 last_frame = audio_features[-1:]  # (1, feat_dim)
-                window_audio = np.tile(last_frame, (5, 1))
+                window_audio = np.tile(last_frame, (num_frames, 1))
             else:
                 available = audio_features[start_audio_idx:]
-                pad_len = 5 - available.shape[0]
+                pad_len = num_frames - available.shape[0]
                 if pad_len > 0:
                     padding = np.tile(available[-1:], (pad_len, 1))
                     window_audio = np.concatenate([available, padding], axis=0)
                 else:
-                    window_audio = available[:5]
+                    window_audio = available[:num_frames]
 
         input_ids = torch.tensor([input_tokens], device=device)
         audio_feat = torch.tensor(
@@ -329,14 +402,15 @@ def interpolate_sequence(model, keyframe_tokens, audio_features, generate_steps=
 
         output = output[0].cpu().tolist()
 
-        # 解析中间 3 帧 (f=1,2,3)
+        # 解析中间帧
         interp_frames = []
-        for f in range(1, 4):
+        for f in range(1, num_frames - 1):
             frame_tokens = []
             for j in range(ntpf):
                 token_id = output[f * ntpf + j]
                 frame_tokens.append(token_id - offsets[j])
             interp_frames.append(frame_tokens)
+        validate_motion_token_frames(interp_frames, ntpf, codebook_size, context="Infill output")
 
         # 组装输出
         if i == 0:
@@ -404,7 +478,61 @@ def format_audio_tokens_for_prompt(audio_tokens, indices):
     return "".join(parts)
 
 
-def construct_llm_prompt(action_text, audio_tokens, offset=0, step=4):
+def format_motion_tokens_for_prompt(motion_tokens):
+    """Format residual token frames as [res1_i][res2_i][res3_i][res4_i]."""
+    parts = []
+    for frame in motion_tokens:
+        for idx, value in enumerate(frame, start=1):
+            parts.append(f"[res{idx}_{int(value)}]")
+    return "".join(parts)
+
+
+def format_audio_motion_prefix(audio_tokens, motion_tokens, step=4, prefix_keyframes=2):
+    """
+    Format the last N sparse audio-motion keyframe pairs for continuation mode.
+
+    `motion_tokens` can be dense tokens from a previous utterance; this helper
+    samples keyframe positions at the same interval used by the LLM planner.
+    """
+    if not audio_tokens or not motion_tokens or prefix_keyframes <= 0:
+        return ""
+    max_len = min(len(audio_tokens), len(motion_tokens))
+    indices = list(range(0, max_len, step))
+    if not indices:
+        return ""
+    use_indices = indices[-prefix_keyframes:]
+    parts = []
+    for idx in use_indices:
+        audio_token = audio_tokens[idx]
+        if isinstance(audio_token, list) and audio_token:
+            audio_token = audio_token[0]
+        parts.append(f"[audio_{int(audio_token)}]")
+        parts.append(format_motion_tokens_for_prompt([motion_tokens[idx]]))
+    return "".join(parts)
+
+
+def get_continuation_boundary_keyframe(audio_tokens, motion_tokens, step=4, prefix_keyframes=2):
+    """
+    Return the last sparse motion keyframe used as continuation context.
+
+    The prompt may include multiple previous-turn audio-motion keyframe pairs,
+    but the Infill Transformer only needs the final motion keyframe as the
+    left boundary for the first current-turn interpolation window.
+    """
+    if not audio_tokens or not motion_tokens or prefix_keyframes <= 0:
+        return None
+    max_len = min(len(audio_tokens), len(motion_tokens))
+    indices = list(range(0, max_len, step))
+    if not indices:
+        return None
+    boundary_idx = indices[-min(prefix_keyframes, len(indices)):]
+    last_idx = boundary_idx[-1]
+    if last_idx >= len(motion_tokens):
+        return None
+    return list(motion_tokens[last_idx])
+
+
+def construct_llm_prompt(action_text, audio_tokens, offset=0, step=4, prefix_text="", start_index=None):
     """
     构建 LLM 推理的 prompt
 
@@ -413,18 +541,21 @@ def construct_llm_prompt(action_text, audio_tokens, offset=0, step=4):
         audio_tokens: 完整的 audio token 列表（每帧一个）
         offset: 采样偏移 (0-3)
         step: 采样间隔 (默认 4)
+        prefix_text: continuation mode 的上一轮 audio-motion keyframe pair
+        start_index: optional absolute start index for sparse audio sampling
 
     Returns:
         (prompt_str, sampled_indices)
     """
     total_frames = len(audio_tokens)
-    sampled_indices = list(range(offset, total_frames, step))
+    start = offset if start_index is None else int(start_index)
+    sampled_indices = list(range(start, total_frames, step))
     audio_str = format_audio_tokens_for_prompt(audio_tokens, sampled_indices)
-    prompt = f"{action_text}{audio_str}"
+    prompt = f"{prefix_text}{action_text}{audio_str}"
     return prompt, sampled_indices
 
 
-def extract_description(text: str):
+def extract_description(text):
     """
     从 motion2text.json 的文本中提取描述内容作为 action_text
 
@@ -436,25 +567,10 @@ def extract_description(text: str):
       "【表情：担忧】【动作：无动作】爬坡前..." -> "动作：担忧"
       "【表情：无表情】【动作：无动作】你脸盲..." -> "动作：无动作"
     """
-    pattern = r'【(.+?)】'
-    matches = re.findall(pattern, text)
-    if not matches:
+    normalized = normalize_motion_text(text)
+    if not normalized:
         return None
-
-    last_tag = matches[-1]
-
-    # 如果动作为"无动作"，尝试用表情标签替代
-    if last_tag == "动作：无动作":
-        # 查找表情标签
-        for tag in matches:
-            if tag.startswith("表情：") and tag != "表情：无表情":
-                expression = tag.replace("表情：", "")
-                if "动作" in expression:
-                    return expression
-                else:
-                    return f"动作：{expression}"
-
-    return last_tag
+    return extract_motion_action_text(normalized)
 
 
 def build_action_text_from_motion2text(motion2text_json_path):
@@ -501,6 +617,12 @@ def run_pipeline_single(
     top_p=0.4,
     generate_steps=6,
     template="Human: {prompt}<|im_end|>\nAssistant:",
+    prefix_audio_tokens=None,
+    prefix_audio_features=None,
+    prefix_motion_tokens=None,
+    continuation_prefix_keyframes=0,
+    llm_max_tokens=1024,
+    keyframe_len_policy="strict",
 ):
     """
     单样本完整推理流水线
@@ -518,19 +640,58 @@ def run_pipeline_single(
         top_p: LLM top_p
         generate_steps: Mask Transformer 生成步数
         template: LLM prompt 模板
+        llm_max_tokens: vLLM 最大生成 token 数
+        keyframe_len_policy: strict 或 warn
 
     Returns:
         dict: 包含 sparse_tokens, dense_tokens, timing 等信息；失败返回 None
     """
     result = {"name": name}
+    expected_step = int(mask_model.config.num_frames) - 1
+    if step != expected_step:
+        raise ValueError(
+            f"Planner step ({step}) must match Infill Transformer num_frames-1 ({expected_step}). "
+            "Train/load a matching infill model or pass the matching --step."
+        )
+    validate_audio_inputs(
+        audio_tokens,
+        audio_features,
+        audio_feat_dim=mask_model.config.audio_feat_dim,
+        context=f"{name}.audio",
+    )
 
     # ---- Step 1: 构建 LLM prompt ----
+    boundary_keyframe = get_continuation_boundary_keyframe(
+        prefix_audio_tokens,
+        prefix_motion_tokens,
+        step=step,
+        prefix_keyframes=continuation_prefix_keyframes,
+    )
+    prefix_text = format_audio_motion_prefix(
+        prefix_audio_tokens,
+        prefix_motion_tokens,
+        step=step,
+        prefix_keyframes=continuation_prefix_keyframes,
+    )
+    continuation_active = boundary_keyframe is not None and bool(prefix_text)
+    sampling_start = offset + step - 1 if continuation_active else offset
+    if continuation_active and len(audio_tokens) > 0 and sampling_start >= len(audio_tokens):
+        sampling_start = len(audio_tokens) - 1
     prompt, sampled_indices = construct_llm_prompt(
-        action_text, audio_tokens, offset, step
+        action_text,
+        audio_tokens,
+        offset,
+        step,
+        prefix_text=prefix_text,
+        start_index=sampling_start,
     )
     text_list = [template.format(prompt=prompt)]
 
-    print(f"  [Step 1] LLM 推理 | 关键帧数: {len(sampled_indices)}")
+    print(
+        f"  [Step 1] LLM 推理 | 关键帧数: {len(sampled_indices)}, "
+        f"采样起点: {sampling_start}, "
+        f"prefix关键帧: {continuation_prefix_keyframes if prefix_text else 0}"
+    )
 
     # ---- Step 2: 调用 vLLM 预测稀疏 motion token plan ----
     t0 = time.time()
@@ -538,7 +699,7 @@ def run_pipeline_single(
         text_list=text_list,
         temperature=temperature,
         top_p=top_p,
-        max_tokens=1024,
+        max_tokens=llm_max_tokens,
         stop=["<|im_end|>"],
         base_token_start=0,
     )
@@ -552,24 +713,49 @@ def run_pipeline_single(
     sparse_tokens = llm_result["tokens"]
     num_keyframes = len(sparse_tokens["res_1"])
     print(f"  [Step 1] LLM 完成 | 预测关键帧: {num_keyframes}, 耗时: {t1 - t0:.3f}s")
-
-    if num_keyframes < 2:
-        print("  ❌ LLM 输出关键帧数不足 (<2)，无法插帧")
-        return None
+    validate_planner_keyframe_count(
+        num_keyframes=num_keyframes,
+        expected_keyframes=len(sampled_indices),
+        reported_total_len=llm_result.get("total_len"),
+        policy=keyframe_len_policy,
+        context=name,
+    )
 
     # ---- Step 3: 转换为关键帧格式 ----
     keyframes = sparse_to_keyframes(sparse_tokens)
+    if boundary_keyframe is not None:
+        validate_motion_token_frames(
+            [boundary_keyframe],
+            mask_model.config.num_tokens_per_frame,
+            mask_model.config.codebook_size,
+            context="continuation boundary keyframe",
+        )
+
+    if num_keyframes < 1 or (num_keyframes < 2 and boundary_keyframe is None):
+        print("  ❌ LLM 输出关键帧数不足，无法插帧")
+        return None
 
     # ---- Step 4: Mask Transformer 插帧 ----
     print(
         f"  [Step 2] Mask Transformer 插帧 | "
-        f"关键帧: {num_keyframes}, audio 特征: {audio_features.shape}"
+        f"关键帧: {num_keyframes}, audio 特征: {audio_features.shape}, "
+        f"continuation边界: {'yes' if boundary_keyframe is not None else 'no'}"
     )
 
     t2 = time.time()
-    dense_tokens = interpolate_sequence(
-        mask_model, keyframes, audio_features, generate_steps=generate_steps
-    )
+    interp_keyframes = [boundary_keyframe] + keyframes if boundary_keyframe is not None else keyframes
+    interp_audio_features = audio_features
+    continuation_audio_boundary_used = False
+    if boundary_keyframe is not None:
+        if prefix_audio_features is not None and len(prefix_audio_features) > 0:
+            boundary_audio = np.asarray(prefix_audio_features[-1:], dtype=np.float32)
+            continuation_audio_boundary_used = True
+        else:
+            boundary_audio = np.asarray(audio_features[:1], dtype=np.float32)
+        interp_audio_features = np.concatenate([boundary_audio, audio_features], axis=0)
+    dense_tokens = interpolate_sequence(mask_model, interp_keyframes, interp_audio_features, generate_steps=generate_steps)
+    if boundary_keyframe is not None:
+        dense_tokens = dense_tokens[1:]
     t3 = time.time()
 
     # ---- Step 5: 长度对齐 —— 确保 motion tokens 与音频帧数严格一致 ----
@@ -599,10 +785,17 @@ def run_pipeline_single(
         "sparse_tokens": sparse_tokens,
         "dense_tokens": dense_tokens,
         "num_keyframes": num_keyframes,
+        "expected_keyframes": len(sampled_indices),
+        "num_prefix_keyframes": continuation_prefix_keyframes if prefix_text else 0,
+        "continuation_boundary_used": boundary_keyframe is not None,
+        "continuation_boundary_keyframe": boundary_keyframe,
+        "continuation_sampling_start": sampling_start,
+        "continuation_audio_boundary_used": continuation_audio_boundary_used,
         "num_dense_frames": len(dense_tokens),
         "num_audio_frames": target_length,
         "length_adjusted": raw_length != target_length,
         "length_adjustment": target_length - raw_length,
+        "keyframe_len_policy": keyframe_len_policy,
         "llm_raw_output": llm_result.get("raw_output", ""),
         "llm_total_len": llm_result.get("total_len"),
         "timing": {
@@ -676,9 +869,16 @@ def demo_mode(args, vllm_client, mask_model, name_to_action,
         audio_features=audio_feat,
         name=target_name,
         offset=args.offset,
+        step=args.step,
         temperature=args.temperature,
         top_p=args.top_p,
         generate_steps=args.generate_steps,
+        prefix_audio_tokens=args.prefix_audio_tokens,
+        prefix_audio_features=args.prefix_audio_features,
+        prefix_motion_tokens=args.prefix_motion_tokens,
+        continuation_prefix_keyframes=args.continuation_prefix_keyframes,
+        llm_max_tokens=args.llm_max_tokens,
+        keyframe_len_policy=args.keyframe_len_policy,
     )
 
     if result is None:
@@ -716,11 +916,15 @@ def batch_mode(args, vllm_client, mask_model, name_to_action,
     """Batch 模式：批量推理验证集"""
     with open(args.val_split_file, "r") as f:
         val_names = [line.strip() for line in f if line.strip()]
+    if args.max_samples is not None:
+        val_names = val_names[: args.max_samples]
+        print(f"[数据] Batch max_samples={args.max_samples}; processing {len(val_names)} samples")
     # val_names = random.sample(val_names, min(100, len(val_names)))
     
     results = []
     success_count = 0
     fail_count = 0
+    failure_reasons = []
     total_llm_time = 0.0
     total_interp_time = 0.0
 
@@ -729,18 +933,21 @@ def batch_mode(args, vllm_client, mask_model, name_to_action,
         motion_tokens = load_motion_tokens(name, motion_token_dir)
         if motion_tokens is None:
             fail_count += 1
+            failure_reasons.append((name, "missing motion tokens"))
             continue
 
         # 加载 audio tokens (for LLM prompt)
         audio_tokens = load_audio_tokens(name, audio_token_dir)
         if audio_tokens is None:
             fail_count += 1
+            failure_reasons.append((name, "missing audio tokens"))
             continue
 
         # 加载音频特征
         audio_feat = load_audio_features(name, audio_feat_dir)
         if audio_feat is None:
             fail_count += 1
+            failure_reasons.append((name, "missing audio features"))
             continue
 
         # 确定动作标签
@@ -750,18 +957,31 @@ def batch_mode(args, vllm_client, mask_model, name_to_action,
             action_text = name_to_action.get(name, "动作：说话")
 
         # 运行流水线
-        result = run_pipeline_single(
-            vllm_client,
-            mask_model,
-            action_text=action_text,
-            audio_tokens=audio_tokens,
-            audio_features=audio_feat,
-            name=name,
-            offset=args.offset,
-            temperature=args.temperature,
-            top_p=args.top_p,
-            generate_steps=args.generate_steps,
-        )
+        try:
+            result = run_pipeline_single(
+                vllm_client,
+                mask_model,
+                action_text=action_text,
+                audio_tokens=audio_tokens,
+                audio_features=audio_feat,
+                name=name,
+                offset=args.offset,
+                step=args.step,
+                temperature=args.temperature,
+                top_p=args.top_p,
+                generate_steps=args.generate_steps,
+                prefix_audio_tokens=args.prefix_audio_tokens,
+                prefix_audio_features=args.prefix_audio_features,
+                prefix_motion_tokens=args.prefix_motion_tokens,
+                continuation_prefix_keyframes=args.continuation_prefix_keyframes,
+                llm_max_tokens=args.llm_max_tokens,
+                keyframe_len_policy=args.keyframe_len_policy,
+            )
+        except Exception as exc:
+            fail_count += 1
+            failure_reasons.append((name, str(exc)))
+            tqdm.write(f"[FAIL] {name}: {exc}")
+            continue
 
         if result is not None:
             result["gt_tokens"] = motion_tokens
@@ -772,6 +992,7 @@ def batch_mode(args, vllm_client, mask_model, name_to_action,
             total_interp_time += result["timing"]["interp_time"]
         else:
             fail_count += 1
+            failure_reasons.append((name, "pipeline returned None"))
 
     # 保存结果
     with open(args.output_path, "w") as f:
@@ -780,6 +1001,12 @@ def batch_mode(args, vllm_client, mask_model, name_to_action,
     print(f"\n{'=' * 70}")
     print(f"  批量推理完成")
     print(f"  成功: {success_count}, 失败: {fail_count}")
+    if failure_reasons:
+        print("  失败样本:")
+        for fail_name, reason in failure_reasons[:20]:
+            print(f"    - {fail_name}: {reason}")
+        if len(failure_reasons) > 20:
+            print(f"    ... 还有 {len(failure_reasons) - 20} 个失败样本")
     if success_count > 0:
         print(f"  平均耗时 — LLM: {total_llm_time / success_count:.3f}s, "
               f"插帧: {total_interp_time / success_count:.3f}s")
@@ -852,12 +1079,29 @@ def main():
                         help="动作标签文本 (不指定则从数据中自动获取)")
     parser.add_argument("--offset", type=int, default=0,
                         help="采样偏移 0-3 (默认: 0)")
+    parser.add_argument("--step", type=int, default=None,
+                        help="LLM keyframe interval; default is mask_model.config.num_frames - 1")
     parser.add_argument("--temperature", type=float, default=0.5,
                         help="LLM 采样温度 (默认: 0.5)")
     parser.add_argument("--top_p", type=float, default=0.4,
                         help="LLM top_p (默认: 0.4)")
+    parser.add_argument("--llm_max_tokens", type=int, default=1024,
+                        help="vLLM 最大生成 token 数 (默认: 1024)")
+    parser.add_argument("--keyframe_len_policy", type=str, default="strict",
+                        choices=["strict", "warn"],
+                        help="LLM keyframe 数与 prompt 采样数不一致时的处理策略")
     parser.add_argument("--output_path", type=str, default="./pipeline_demo_result.json",
                         help="输出结果 JSON 路径")
+    parser.add_argument("--max_samples", type=int, default=None,
+                        help="Batch mode: process at most this many split entries")
+    parser.add_argument("--prefix_audio_token_json", type=str, default=None,
+                        help="Previous-turn audio token JSON for continuation prompt")
+    parser.add_argument("--prefix_audio_feat_npy", type=str, default=None,
+                        help="Previous-turn HuBERT feature NPY for continuation infill boundary")
+    parser.add_argument("--prefix_motion_token_json", type=str, default=None,
+                        help="Previous-turn dense/motion token JSON for continuation prompt")
+    parser.add_argument("--continuation_prefix_keyframes", type=int, default=0,
+                        help="Number of previous sparse keyframes to prepend to the LLM prompt")
 
     args = parser.parse_args()
 
@@ -890,11 +1134,38 @@ def main():
 
     # ---- 加载 Mask Transformer ----
     mask_model = load_mask_transformer(args.mask_ckpt, device=args.device)
+    if args.step is None:
+        args.step = int(mask_model.config.num_frames) - 1
+    expected_step = int(mask_model.config.num_frames) - 1
+    if args.step != expected_step:
+        raise ValueError(
+            f"--step={args.step} does not match mask model num_frames-1={expected_step}; "
+            "use a matching checkpoint for this keyframe interval."
+        )
     print()
 
     # ---- 构建动作标签映射（从 motion2text.json）----
     print(f"[数据] 加载 motion2text: {args.motion2text_json}")
     name_to_action = build_action_text_from_motion2text(args.motion2text_json)
+
+    args.prefix_audio_tokens = None
+    args.prefix_audio_features = None
+    args.prefix_motion_tokens = None
+    if args.prefix_audio_token_json or args.prefix_motion_token_json:
+        if not (args.prefix_audio_token_json and args.prefix_motion_token_json):
+            raise ValueError("Continuation mode requires both --prefix_audio_token_json and --prefix_motion_token_json")
+        with open(args.prefix_audio_token_json, "r", encoding="utf-8") as f:
+            args.prefix_audio_tokens = json.load(f).get("tokens", [])
+        if args.prefix_audio_feat_npy:
+            args.prefix_audio_features = np.load(args.prefix_audio_feat_npy).astype(np.float32)
+        with open(args.prefix_motion_token_json, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+            args.prefix_motion_tokens = payload.get("dense_tokens") or payload.get("tokens", [])
+        print(
+            f"[数据] continuation prefix: audio={len(args.prefix_audio_tokens)}, "
+            f"features={0 if args.prefix_audio_features is None else len(args.prefix_audio_features)}, "
+            f"motion={len(args.prefix_motion_tokens)}, keyframes={args.continuation_prefix_keyframes}"
+        )
 
     print()
 

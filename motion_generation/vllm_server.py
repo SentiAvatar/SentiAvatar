@@ -23,6 +23,12 @@ app.json.sort_keys = False
 parser = argparse.ArgumentParser()
 parser.add_argument('--port', type=int, default=8081)
 parser.add_argument('--model_path', type=str)
+parser.add_argument('--gpu_memory_utilization', type=float, default=0.2)
+parser.add_argument('--max_model_len', type=int, default=1600)
+parser.add_argument('--max_num_batched_tokens', type=int, default=1600)
+parser.add_argument('--max_num_seqs', type=int, default=1)
+parser.add_argument('--max_tokens_limit', type=int, default=2048)
+parser.add_argument('--default_max_tokens', type=int, default=512)
 args = parser.parse_args()
 
 port = args.port
@@ -44,10 +50,10 @@ stop_token = "<|im_end|>"
 llm = LLM(
     model=model_path,
     # 显存优化参数
-    gpu_memory_utilization=0.2,  # 降低显存利用率，避免OOM [1,4](@ref)
-    max_model_len=1600,  # 限制最大上下文长度，减少KV缓存 [1](@ref)
-    max_num_batched_tokens=1600,  # 限制批次token数，控制峰值显存 [1](@ref)
-    max_num_seqs=1,  # 限制并发序列数 [1](@ref)
+    gpu_memory_utilization=args.gpu_memory_utilization,
+    max_model_len=args.max_model_len,
+    max_num_batched_tokens=args.max_num_batched_tokens,
+    max_num_seqs=args.max_num_seqs,
     enable_chunked_prefill=True,  # 长提示词分块处理 [1](@ref)
     # enforce_eager=True,  # 关闭CUDA图，减少内存池开销 [1](@ref)
     # 可选量化（如果模型支持）
@@ -61,7 +67,7 @@ llm = LLM(
 DEFAULT_SAMPLING_PARAMS = {
     "temperature": 0.3,
     "top_p": 0.4,
-    "max_tokens": 512,
+    "max_tokens": args.default_max_tokens,
     "stop": "<|im_end|>"
 }
 
@@ -80,7 +86,7 @@ def validate_sampling_params(data):
     
     if 'max_tokens' in data:
         max_tokens = int(data.get('max_tokens', params['max_tokens']))
-        params['max_tokens'] = max(64, min(2048, max_tokens))  # 限制token数量
+        params['max_tokens'] = max(1, min(args.max_tokens_limit, max_tokens))
     
     if 'stop' in data:
         stop = data.get('stop')
@@ -129,7 +135,7 @@ def t2m_api():
                 except json.JSONDecodeError:
                     len_list = [data['len_list']]  # 如果是单个字符串，转为列表
             else:
-                len_list = data['text_list']
+                len_list = data['len_list']
 
         
         # 🆕 动态获取采样参数
@@ -213,7 +219,7 @@ def get_parameters_info():
             "max_tokens": {
                 "type": "integer",
                 "default": DEFAULT_SAMPLING_PARAMS['max_tokens'],
-                "range": "64-2048", 
+                "range": f"1-{args.max_tokens_limit}",
                 "description": "最大生成token数量"
             },
             "stop": {
@@ -230,6 +236,9 @@ def health_check():
     return jsonify({
         "status": "healthy",
         "model_loaded": True,
+        "max_model_len": args.max_model_len,
+        "max_num_batched_tokens": args.max_num_batched_tokens,
+        "max_tokens_limit": args.max_tokens_limit,
         "gpu_memory_allocated": f"{torch.cuda.memory_allocated() // 1024**2}MB" if torch.cuda.is_available() else "N/A"
     })
 

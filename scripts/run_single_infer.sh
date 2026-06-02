@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 # ============================================================
 # 单条样本推理脚本 (Single Case Inference)
 #

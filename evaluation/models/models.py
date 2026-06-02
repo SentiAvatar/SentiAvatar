@@ -78,14 +78,15 @@ class TextEncoder(nn.Module):
         self.t5 = False
         if model_name == "ViT-B/32":
             self.clip = True
-            clip_model, _ = clip.load("ViT-B/32", device=torch.device('cuda'), jit=False)  # Must set jit=False for training
+            clip_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            clip_model, _ = clip.load("ViT-B/32", device=clip_device, jit=False)  # Must set jit=False for training
             #clip.model.convert_weights(clip_model)  # Actually this line is unnecessary since clip by default already on float16
             self.text_model = clip_model.float()
         elif model_name == "t5-base" or model_name == "t5-large":
             self.t5 = True
             self.text_model = transformers.AutoModel.from_pretrained(model_name)
         else:
-            self.text_model = transformers.AutoModel.from_pretrained("/data/home/jinch/tech_report/susu_avatar_training_gen_demo/ChronAccRet-master/bert-base-chinese")
+            self.text_model = transformers.AutoModel.from_pretrained(model_name)
 
         for param in self.text_model.parameters():
             param.requires_grad = trainable
@@ -363,4 +364,3 @@ class ChronTMR(nn.Module):
             return loss_all
         else:
             return t_latents, m_latents
-

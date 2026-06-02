@@ -12,21 +12,23 @@ Metrics computed:
     between audio onset events and motion velocity peak events. Lower is better (unit: seconds).
     ESD = (d_a→m + d_m→a) / 2, where d_a→m is mean nearest distance from audio to motion,
     and d_m→a is the reverse. Uses dynamic threshold (mean+0.2*std) for motion peak detection.
-  (FID & Diversity require both pred and gt npy files in the same motion_dir)
+  (FID & Diversity require both pred and gt npy files; gt defaults to motion_dir
+   and can be overridden with +eval.gt_motion_dir=/path/to/gt_npy_dir)
 
 Usage (pred, default):
-    cd ChronAccRet-master
-    python evaluate_pred_motion.py
+    cd evaluation
+    python evaluate_pred_motion_v2.py
 
 Override motion_type to gt (for future use):
-    python evaluate_pred_motion.py +eval.motion_type=gt
+    python evaluate_pred_motion_v2.py +eval.motion_type=gt
 
 Override any path:
-    python evaluate_pred_motion.py \
+    python evaluate_pred_motion_v2.py \
         +eval.motion_type=pred \
         +eval.motion_dir=/path/to/your/output_dir \
         +eval.motion2text_path=/path/to/motion2text.json \
         +eval.model_path=/path/to/best_model.pt \
+        +eval.gt_motion_dir=/path/to/dir/with_gt_npy \
         +eval.output_dir=/path/to/save/metrics \
         +eval.diversity_times=300
 """
@@ -55,70 +57,17 @@ from datasets.datasets import token_process
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
 logger = logging.getLogger(__name__)
 
-# ─── 默认路径配置 ─────────────────────────────────────────────────────────────
-# 可通过命令行 "+eval.xxx=..." 覆盖
-
-# ours
-
-# DEFAULT_MOTION_DIR = (
-#     "/data/home/jinch/tech_report/susu_avatar_training_gen_demo"
-#     "/VQ_V0205/output_gen/pipeline_reconstruct_hubertfeats_vTag_eval"
-# )
-
-# baseline: emage
-# DEFAULT_MOTION_DIR = (
-#     "/data/home/jinch/tech_report/susu_avatar_training_gen_demo"
-#     "/baseline_results/susu_avatar_emage_align"
-# )
-
-# # ablation: from raw
+# Default repository-local paths. Override them with Hydra CLI arguments such as
+# "+eval.motion_dir=..." or use scripts/run_eval.sh environment variables.
 _PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_MOTION_DIR = os.path.join(_PROJECT_DIR, "output/reconstructed")
-
-# ablation: only_text
-# DEFAULT_MOTION_DIR = (
-#     "/data/home/jinch/tech_report/susu_avatar_training_gen_demo"
-#     "/VQ_V0205/output_gen_ablation/only_text"
-# )
-
-# # ablation: step8
-# DEFAULT_MOTION_DIR = (
-#     "/data/home/jinch/tech_report/susu_avatar_training_gen_demo"
-#     "/VQ_V0205/output_gen_ablation/step2"
-# )
-
-
-# # ablation: onlytext_noaudio
-# DEFAULT_MOTION_DIR = (
-#     "/data/home/jinch/tech_report/susu_avatar_training_gen_demo"
-#     "/VQ_V0205/output_gen_ablation/onlytext_noaudio"
-# )
-
-# ablation: token_by_token
-# DEFAULT_MOTION_DIR = (
-#     "/data/home/jinch/tech_report/susu_avatar_training_gen_demo"
-#     "/VQ_V0205/output_gen_ablation/token_by_token"
-# )
-
-# ablation: ours_infillnoaudio
-# DEFAULT_MOTION_DIR = (
-#     "/data/home/jinch/tech_report/susu_avatar_training_gen_demo"
-#     "/VQ_V0205/output_gen_ablation/ours_infillnoaudio"
-# )
-
-# ablation: token_by_token_onlyaudio
-# DEFAULT_MOTION_DIR = (
-#     "/data/home/jinch/tech_report/susu_avatar_training_gen_demo"
-#     "/VQ_V0205/output_gen_ablation/token_by_token_onlyaudio"
-# )
-
-
 DEFAULT_MOTION2TEXT_PATH = os.path.join(_PROJECT_DIR, "data/text_data/motion2text.json")
 DEFAULT_STATS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stats/humanml3d/guoh3dfeats")
 DEFAULT_MODEL_PATH = os.path.join(_PROJECT_DIR, "checkpoints/eval_model/best_model.pt")
 DEFAULT_OUTPUT_DIR = os.path.join(_PROJECT_DIR, "output/eval_results")
 DEFAULT_MOTION_TYPE = "pred"  # "pred" or "gt"
 DEFAULT_DIVERSITY_TIMES = 300  # number of random pairs for diversity
+DEFAULT_REAL_GT_MOTION_DIR = os.path.join(_PROJECT_DIR, "data/motion_data")
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -134,6 +83,14 @@ def save_metric(path, metrics):
     strings = yaml.dump(metrics, indent=4, sort_keys=False)
     with open(path, "w") as f:
         f.write(strings)
+
+
+def as_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() not in {"0", "false", "no", "off"}
+    return bool(value)
 
 
 def transpose(x):
@@ -800,9 +757,16 @@ def evaluate(cfg: DictConfig):
     model_path    = OmegaConf.select(eval_cfg, "model_path",       default=DEFAULT_MODEL_PATH)
     output_dir    = OmegaConf.select(eval_cfg, "output_dir",       default=DEFAULT_OUTPUT_DIR)
     motion_type   = OmegaConf.select(eval_cfg, "motion_type",      default=DEFAULT_MOTION_TYPE)
+    gt_motion_dir = OmegaConf.select(eval_cfg, "gt_motion_dir",    default=motion_dir)
+    real_gt_motion_dir = OmegaConf.select(eval_cfg, "real_gt_motion_dir", default=DEFAULT_REAL_GT_MOTION_DIR)
+    run_real_gt_alignment = as_bool(OmegaConf.select(eval_cfg, "run_real_gt_alignment", default=True))
+    text_model_override = OmegaConf.select(eval_cfg, "text_model_name", default=None)
+    if text_model_override:
+        OmegaConf.update(cfg, "model.text_model_name", text_model_override)
 
     logger.info(f"motion_type : {motion_type}")
     logger.info(f"motion_dir  : {motion_dir}")
+    logger.info(f"gt_motion_dir: {gt_motion_dir}")
     logger.info(f"model_path  : {model_path}")
 
     seed_everything(cfg.train.seed)
@@ -846,14 +810,20 @@ def evaluate(cfg: DictConfig):
     gt_dataset = None
     if motion_type == "pred":
         logger.info("Loading GT dataset for FID / Diversity computation …")
-        gt_dataset = PredMotionTextDataset(
-            cfg=cfg,
-            motion_dir="/data/home/jinch/tech_report/susu_avatar_training_gen_demo/VQ_V0205/output_gen/pipeline_reconstruct_hubertfeats_vTag_eval",
-            motion2text_path=motion2text,
-            stats_dir=stats_dir,
-            motion_type="gt",
-        )
-        logger.info(f"GT Dataset size: {len(gt_dataset)}")
+        if os.path.isdir(gt_motion_dir):
+            gt_dataset = PredMotionTextDataset(
+                cfg=cfg,
+                motion_dir=gt_motion_dir,
+                motion2text_path=motion2text,
+                stats_dir=stats_dir,
+                motion_type="gt",
+            )
+            logger.info(f"GT Dataset size: {len(gt_dataset)}")
+        else:
+            logger.warning(
+                "GT motion directory does not exist; skipping FID/Diversity: "
+                f"{gt_motion_dir}"
+            )
 
     # ─── 评估协议 ─────────────────────────────────────────────────────────
     os.makedirs(output_dir, exist_ok=True)
@@ -958,8 +928,7 @@ def evaluate(cfg: DictConfig):
     logger.info(f"BAS metrics saved → {bas_save_path}")
 
     # BAS for real GT (upper bound reference — uses original motion, not VQ-reconstructed)
-    real_gt_motion_dir = os.path.join(_PROJECT_DIR, "data/motion_data")
-    if True:
+    if run_real_gt_alignment and os.path.isdir(real_gt_motion_dir):
         logger.info("Computing BAS for real GT (upper bound) …")
         gt_bas_metrics = compute_beat_alignment_metrics_from_dir(
             dataset, real_gt_motion_dir, wav_dir, fps=20, tolerance=bas_tolerance
@@ -975,6 +944,13 @@ def evaluate(cfg: DictConfig):
         gt_bas_save_path = os.path.join(output_dir, gt_bas_fname)
         save_metric(gt_bas_save_path, gt_bas_metrics)
         logger.info(f"GT BAS metrics saved → {gt_bas_save_path}")
+    elif run_real_gt_alignment:
+        logger.warning(
+            "Real GT motion directory does not exist; skipping GT BAS upper bound: "
+            f"{real_gt_motion_dir}"
+        )
+    else:
+        logger.info("Skipping GT BAS upper bound because eval.run_real_gt_alignment=false")
 
 
 if __name__ == "__main__":

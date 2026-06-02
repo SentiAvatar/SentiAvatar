@@ -14,6 +14,7 @@
 
 import os
 import json
+import argparse
 import random
 import re
 import numpy as np
@@ -96,8 +97,8 @@ def find_config_path_from_checkpoint(checkpoint_path: str) -> str:
     根据 checkpoint 路径找到对应的 config 文件路径
     
     例如:
-    checkpoint: /disk0/home/gaoqz/gqzwork/aTrain_VQVAE/checkpoints/quat63nodes_v2_0120/gqzV4/model/latest.pth
-    config: /disk0/home/gaoqz/gqzwork/aTrain_VQVAE/checkpoints/quat63nodes_v2_0120/gqzV4/opt.txt
+    checkpoint: checkpoints/rvqvae/model/latest.pth
+    config: checkpoints/rvqvae/opt.txt
     
     Args:
         checkpoint_path: checkpoint 文件的完整路径
@@ -113,6 +114,34 @@ def find_config_path_from_checkpoint(checkpoint_path: str) -> str:
     config_path = os.path.join(experiment_dir, "opt.txt")
     
     return config_path
+
+
+def find_meta_dir_from_checkpoint(checkpoint_path: Optional[str] = None) -> str:
+    """Prefer checkpoint-local normalization stats, then fall back to bundled demo stats."""
+    module_dir = os.path.dirname(os.path.abspath(__file__))
+    if checkpoint_path:
+        model_dir = os.path.dirname(checkpoint_path)
+        experiment_dir = os.path.dirname(model_dir)
+        meta_dir = os.path.join(experiment_dir, "meta")
+        if (
+            os.path.exists(os.path.join(meta_dir, "mean.npy"))
+            and os.path.exists(os.path.join(meta_dir, "std.npy"))
+        ):
+            return meta_dir
+    return os.path.join(module_dir, "meta", "mta_gen_demo")
+
+
+def load_motion_stats(
+    checkpoint_path: Optional[str] = None,
+    device: Optional[torch.device] = None,
+):
+    """Load body-motion normalization stats used by RVQVAE preprocessing/decoding."""
+    meta_dir = find_meta_dir_from_checkpoint(checkpoint_path)
+    mean = np.load(os.path.join(meta_dir, "mean.npy"))
+    std = np.load(os.path.join(meta_dir, "std.npy"))
+    if device is not None:
+        return torch.tensor(mean, dtype=torch.float32, device=device), torch.tensor(std, dtype=torch.float32, device=device)
+    return mean, std
 
 
 def parse_opt_txt(opt_path: str) -> Dict:
@@ -342,14 +371,13 @@ def load_model(checkpoint_path: str, config: Config, device: torch.device) -> RV
     return model
 
 
-def encode_motion(model: RVQVAE, motion_dict: Dict[str, np.ndarray], device: torch.device) -> MotionTokens:
-    
-    _module_dir = os.path.dirname(os.path.abspath(__file__))
-    mean = np.load(os.path.join(_module_dir, "meta/mta_gen_demo/mean.npy")) 
-    std = np.load(os.path.join(_module_dir, "meta/mta_gen_demo/std.npy")) 
-        
-    mean = torch.tensor(mean).to(device)
-    std = torch.tensor(std).to(device)
+def encode_motion(
+    model: RVQVAE,
+    motion_dict: Dict[str, np.ndarray],
+    device: torch.device,
+    checkpoint_path: Optional[str] = None,
+) -> MotionTokens:
+    mean, std = load_motion_stats(checkpoint_path, device)
 
 
     """编码动作为 tokens"""
@@ -376,14 +404,10 @@ def encode_motion(model: RVQVAE, motion_dict: Dict[str, np.ndarray], device: tor
     return motion_tokens
 
 def decode_tokens(model: RVQVAE, motion_tokens: MotionTokens, motion_dict: Dict[str, np.ndarray], config: Config, device: torch.device,
-                  src_fps: float = 20.0, tgt_fps: float = 30.0) -> Dict[str, np.ndarray]:
+                  src_fps: float = 20.0, tgt_fps: float = 30.0,
+                  checkpoint_path: Optional[str] = None) -> Dict[str, np.ndarray]:
     """解码 tokens 为动作数据"""
-    _module_dir = os.path.dirname(os.path.abspath(__file__))
-    mean = np.load(os.path.join(_module_dir, "meta/mta_gen_demo/mean.npy")) 
-    std = np.load(os.path.join(_module_dir, "meta/mta_gen_demo/std.npy")) 
-        
-    mean = torch.tensor(mean).to(device)
-    std = torch.tensor(std).to(device)
+    mean, std = load_motion_stats(checkpoint_path, device)
 
     with torch.no_grad():
         # 将 tokens 转换为模型输入格式
@@ -406,20 +430,12 @@ def decode_tokens(model: RVQVAE, motion_tokens: MotionTokens, motion_dict: Dict[
         print("body_tokens:", body_tokens.shape)
         left_motion = torch.tensor(motion_dict["left"], dtype=torch.float32).unsqueeze(0).to(device)
         right_motion = torch.tensor(motion_dict["right"], dtype=torch.float32).unsqueeze(0).to(device)
-        body_motion = torch.tensor(motion_dict["body"], dtype=torch.float32).to(device)
         
         # 解码
         x_out = model.forward_decoder(code_idx_dict)  # (B, T, D)
-        pred_whole_motion = x_out.sum(0)  # 取第一个 batch
-        
-        body_motion[:, 2] = body_motion[:, 2] - body_motion[0, 2]
-        body_motion[1:, :3] = body_motion[1:, :3] - body_motion[:-1, :3]
-        body_motion = (body_motion - mean) / std 
-        # body_motion = body_motion.unsqueeze(0)
-        pred_whole_motion = body_motion
+        pred_whole_motion = x_out.squeeze(0)
         
         pred_whole_motion = pred_whole_motion * std + mean 
-        # pred_whole_motion = body_motion.squeeze(0)
         # 分离不同部位的特征
         body_dim = config.data.body_dim  # 153
                 
@@ -444,7 +460,17 @@ def decode_tokens(model: RVQVAE, motion_tokens: MotionTokens, motion_dict: Dict[
         
         # body_motion = body_motion[:, :, 3:]
         # 重塑为 (B, T, J, 6) 格式
-        print("body_motion:", body_motion.shape)
+        print("decoded_body_motion:", pred_body_motion.shape)
+
+        num_ph_frames = left_motion.shape[1]
+        if frames > num_ph_frames:
+            pad = frames - num_ph_frames
+            left_motion = F.pad(
+                left_motion.permute(0, 2, 1), (0, pad), mode="replicate"
+            ).permute(0, 2, 1)
+            right_motion = F.pad(
+                right_motion.permute(0, 2, 1), (0, pad), mode="replicate"
+            ).permute(0, 2, 1)
         
         pred_body_6d = pred_body_6d.reshape(1, frames, 25, 6)
         pred_left_motion = left_motion[:, :frames].reshape(1, frames, 20, 6)
@@ -493,47 +519,33 @@ def decode_tokens(model: RVQVAE, motion_tokens: MotionTokens, motion_dict: Dict[
         return motion
 
 
+def parse_args():
+    project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    parser = argparse.ArgumentParser(description="Encode/decode one motion file with an RVQVAE checkpoint")
+    parser.add_argument("--checkpoint_path", default=os.path.join(project_dir, "checkpoints", "rvqvae", "model", "epoch_30.pth"))
+    parser.add_argument("--input_npy_path", required=True, help="Motion .npy dict with body/left/right arrays")
+    parser.add_argument("--output_dir", default="./debug")
+    parser.add_argument("--output_name", default=None, help="Default: input file stem + '_pred'")
+    parser.add_argument("--device", default="cuda:0")
+    parser.add_argument("--src_fps", type=float, default=None, help="Default: config.data.fps")
+    parser.add_argument("--tgt_fps", type=float, default=30.0)
+    parser.add_argument("--seed", type=int, default=None, help="Default: checkpoint config seed")
+    return parser.parse_args()
+
+
 def main():
-    """主函数"""
-    
-    # ==================== 配置参数（在这里修改） ====================
-    
-    # 模型检查点路径
-    checkpoint_path = "/data/home/jinch/tech_report/susu_avatar_training_gen_demo/VQ_V0205/checkpoints/quat63nodes_v2_0120/gqzV4/model/epoch_30.pth"
-    # 输入 npy 文件路径
-    # input_npy_path = "/disk1/chuhao/dataset/mocap/mocap_susu_gen_demo/quat63nodes_v4_fix_pos/joint_quat_vecs/fbx_to_json_data_susu_retarget_maya/20251011/Human_0916_180_2_6_01.npy"
-    # input_npy_path = "/disk1/chuhao/dataset/mocap/mocap_susu_gen_demo/quat63nodes_v4_fix_pos/joint_quat_vecs/fbx_to_json_data_susu_retarget_maya/20251104/Human_0916_162_3_7_02_XG.npy"
-    # input_npy_path = "/disk1/chuhao/dataset/mocap/mocap_susu_gen_demo/quat63nodes_v4_fix_pos/joint_quat_vecs/fbx_to_json_data_susu_retarget_maya/20251027/Human_0916_112_4_6_03_XC.npy"
-    # input_npy_path = "/disk1/chuhao/dataset/mocap/mocap_susu_gen_demo/quat63nodes_v4_fix_pos/joint_quat_vecs/fbx_to_json_data_susu_retarget_maya/20251125/Human_1119_86_1_5_02_XG.npy"
-    # input_npy_path = "/disk1/chuhao/dataset/mocap/mocap_susu_gen_demo/quat63nodes_v4_fix_pos/joint_quat_vecs/fbx_to_json_data_susu_retarget_maya/20251031/Human_1021_95_0_2_01_XC.npy"
-    # input_npy_path = "/disk1/chuhao/dataset/mocap/mocap_susu_gen_demo/quat63nodes_v4_fix_pos/joint_quat_vecs/fbx_to_json_data_susu_retarget_maya/20251112/Human_1021_300_2_6_01_XG.npy"
-    # input_npy_path = "/disk1/chuhao/dataset/mocap/mocap_susu_gen_demo/quat63nodes_v4_fix_pos/joint_quat_vecs/fbx_to_json_data_susu_retarget_maya/20250915/Human_0912_145-6_01.npy"
-    # input_npy_path = "/disk1/chuhao/dataset/mocap/mocap_susu_gen_demo/quat63nodes_v4_fix_pos/joint_quat_vecs/fbx_to_json_data_susu_chonglu/20260115/Human_155_229_01_A.npy"
-    # input_npy_path = "/disk1/chuhao/dataset/mocap/mocap_susu_gen_demo/quat63nodes_v4_fix_pos/joint_quat_vecs/fbx_to_json_data_susu_retarget_maya/20251107/Human_0916_188_3_4_01_XC.npy"
-    # input_npy_path = "/disk1/chuhao/dataset/mocap/mocap_susu_gen_demo/quat63nodes_v4_fix_pos/joint_quat_vecs/fbx_to_json_data_susu_retarget_maya/20250903/Human_0901_203-4_01.npy"
-    # input_npy_path = "/disk1/chuhao/dataset/mocap/mocap_susu_gen_demo/quat63nodes_v4_fix_pos/joint_quat_vecs/fbx_to_json_data_susu_retarget_maya/20250903/Human_0901_208-4_01.npy"
-    # input_npy_path = "/disk0/home/chuhao/susu_avatar_training_clean_mix_version/dataset/quat63nodes_v2/joint_quat_vecs/fbx_to_json_data_susu_chonglu/260114/Human_THINKING1_02_A.npy"
-    
-    input_npy_path = "/data/public/chuhao_share/susu_avatar_training_gen_demo/merged_processed_all_data/motion_data/fbx_to_json_data_susu_retarget_maya/20250821/Human_0819_100-8_01.npy"
-    
-    # input_npy_path = "/disk1/chuhao/dataset/mocap/mocap_susu_gen_demo/hunyuan_distill/joint_quat_vecs/00000160_000.npy"
-    # 输出目录和文件名
-    output_dir = "./debug"
-    
-    output_name = input_npy_path.split("/")[-1].split(".")[0] + "_pred"
-    
-    # 设备
-    device_str = "cuda:0"
-    
-    # 帧率配置（如果为 None，则从 config 中读取 src_fps）
-    src_fps = 20.0  # 模型输出帧率，None 表示从 config 读取
-    tgt_fps = 30.0  # 目标输出帧率
-    
-    # 随机种子（如果为 None，则从 config 中读取）
-    seed = None
-    
-    # ==================== 执行推理 ====================
-    
+    """Run one RVQVAE encode/decode demo from command-line arguments."""
+    args = parse_args()
+
+    checkpoint_path = args.checkpoint_path
+    input_npy_path = args.input_npy_path
+    output_dir = args.output_dir
+    output_name = args.output_name or os.path.splitext(os.path.basename(input_npy_path))[0] + "_pred"
+    device_str = args.device
+    src_fps = args.src_fps
+    tgt_fps = args.tgt_fps
+    seed = args.seed
+
     # 根据 checkpoint 路径自动加载配置
     config = load_config_from_checkpoint(checkpoint_path)
     

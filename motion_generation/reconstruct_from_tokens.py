@@ -39,6 +39,7 @@ from infer import (
     load_model,
     fixseed,
     smooth_then_resample,
+    load_motion_stats,
 )
 from models.rvqvae import RVQVAE
 from configs.default_config import Config
@@ -56,6 +57,39 @@ except ImportError:
 # ======================================================================
 #  解码函数
 # ======================================================================
+
+def validate_token_frames(
+    tokens: list,
+    num_quantizers: int,
+    codebook_size: int,
+    context: str,
+) -> None:
+    arr = np.asarray(tokens)
+    if arr.ndim != 2 or arr.shape[1] != num_quantizers:
+        raise ValueError(
+            f"{context}: expected token shape (T,{num_quantizers}), got {arr.shape}"
+        )
+    bad = np.argwhere((arr < 0) | (arr >= codebook_size))
+    if bad.size > 0:
+        frame_idx, residual_idx = bad[0].tolist()
+        value = int(arr[frame_idx, residual_idx])
+        raise ValueError(
+            f"{context}: frame {frame_idx}, residual {residual_idx + 1} has token {value}, "
+            f"expected [0,{codebook_size - 1}]"
+        )
+
+
+def validate_placeholder_motion(
+    motion_dict: dict,
+    left_dim: int,
+    right_dim: int,
+    context: str = "placeholder motion",
+) -> None:
+    for key, dim in (("left", left_dim), ("right", right_dim)):
+        arr = np.asarray(motion_dict.get(key))
+        if arr.ndim != 2 or arr.shape[1] < dim:
+            raise ValueError(f"{context}: expected {key} shape (T,{dim}), got {arr.shape}")
+
 
 def decode_body_tokens(
     model: RVQVAE,
@@ -94,6 +128,7 @@ def decode_body_tokens(
 
         # 反归一化
         pred_whole_motion = pred_whole_motion * std + mean
+        pred_body_np = pred_whole_motion.detach().cpu().numpy().astype(np.float32)
 
         frames = pred_whole_motion.shape[0]
 
@@ -124,6 +159,9 @@ def decode_body_tokens(
             right_motion = F.pad(
                 right_motion.permute(0, 2, 1), (0, pad), mode="replicate"
             ).permute(0, 2, 1)
+
+        eval_left_np = left_motion[0, :frames].detach().cpu().numpy().astype(np.float32)
+        eval_right_np = right_motion[0, :frames].detach().cpu().numpy().astype(np.float32)
 
         pred_left = left_motion[:, :frames].reshape(1, frames, 20, 6)
         pred_right = right_motion[:, :frames].reshape(1, frames, 20, 6)
@@ -157,7 +195,24 @@ def decode_body_tokens(
 
         quat_np = merge_quat.detach().cpu().numpy()
 
-    return {"offset": offset_np, "quat": quat_np}
+    return {
+        "offset": offset_np,
+        "quat": quat_np,
+        "body": pred_body_np,
+        "left": eval_left_np,
+        "right": eval_right_np,
+    }
+
+
+def save_eval_motion_npy(path: str, name: str, motion: Dict[str, np.ndarray]) -> None:
+    """Save the 20 FPS feature dict consumed by evaluation/datasets/pred_motion_dataset.py."""
+    payload = {
+        "name": name,
+        "body": np.asarray(motion["body"], dtype=np.float32),
+        "left": np.asarray(motion["left"], dtype=np.float32),
+        "right": np.asarray(motion["right"], dtype=np.float32),
+    }
+    np.save(path, payload)
 
 
 def add_face_animation_to_json(
@@ -236,6 +291,53 @@ def add_face_animation_to_json(
     print(f"Added face animation to {expect_frames} frames")
     return anim_data
 
+
+def maybe_add_face_animation(
+    anim_data: Dict,
+    face_mode: str,
+    audio_bytes: Optional[bytes] = None,
+    sample_rate: Optional[int] = None,
+    face_data: Optional[np.ndarray] = None,
+    audio_feature_extractor=None,
+    audio_encoder=None,
+    face_vq_model=None,
+    face_pipeline=None,
+    audio_features: Optional[np.ndarray] = None,
+    demo_id: str = "unknown",
+) -> Dict:
+    if face_mode == "none":
+        return anim_data
+    if face_mode == "legacy":
+        if not (
+            FACE_MODEL_AVAILABLE
+            and audio_feature_extractor is not None
+            and audio_encoder is not None
+            and face_vq_model is not None
+            and audio_bytes is not None
+            and face_data is not None
+        ):
+            print("Warning: legacy face models unavailable; keeping static face data.")
+            return anim_data
+        return add_face_animation_to_json(
+            anim_data=anim_data,
+            audio_bytes=audio_bytes,
+            sample_rate=sample_rate,
+            face_data=face_data,
+            audio_feature_extractor=audio_feature_extractor,
+            audio_encoder=audio_encoder,
+            face_vq_model=face_vq_model,
+            demo_id=demo_id,
+        )
+    if face_mode == "infill":
+        if face_pipeline is None or audio_features is None:
+            print("Warning: face infill requested but pipeline/audio features are unavailable; keeping static face data.")
+            return anim_data
+        from face_infill import add_face_to_anim
+
+        face_mta52 = face_pipeline.infer_mta52(audio_features)
+        return add_face_to_anim(anim_data, face_mta52)
+    raise ValueError(f"Unsupported face_mode: {face_mode}")
+
 # ======================================================================
 #  主流程
 # ======================================================================
@@ -253,6 +355,14 @@ def process_single_result(
     tgt_fps: float,
     wave_folder: str = None,
     face_data: np.array = None,
+    face_mode: str = "legacy",
+    face_pipeline=None,
+    audio_feat_dir: str = None,
+    audio_feature_extractor=None,
+    audio_encoder=None,
+    face_vq_model=None,
+    num_quantizers: int = 4,
+    codebook_size: int = 512,
 ):
     """处理单个样本：解码 dense_tokens 和 gt_tokens，保存 BVH/JSON"""
     
@@ -266,18 +376,30 @@ def process_single_result(
     print(f"  dense_tokens: {len(dense_tokens)} 帧, gt_tokens: {len(gt_tokens)} 帧")
     print(f"{'=' * 60}")
 
-    src_audio_file = f"{wave_folder}/{name}.wav"
-    # 读取音频文件
-    with open(src_audio_file, "rb") as f:
-        audio_bytes = f.read()
-    
-    # 获取音频采样率
-    with wave.open(io.BytesIO(audio_bytes), "rb") as wf:
-        sample_rate = wf.getframerate()
+    audio_bytes = None
+    sample_rate = None
+    src_audio_file = f"{wave_folder}/{name}.wav" if wave_folder else None
+    if src_audio_file and os.path.exists(src_audio_file):
+        with open(src_audio_file, "rb") as f:
+            audio_bytes = f.read()
+        with wave.open(io.BytesIO(audio_bytes), "rb") as wf:
+            sample_rate = wf.getframerate()
+
+    audio_features = None
+    if face_mode == "infill":
+        from face_infill import load_audio_features_for_name
+
+        audio_features = load_audio_features_for_name(audio_feat_dir, name)
             
     # ---- 解码 dense_tokens (预测) ----
     if dense_tokens:
         print("  [Pred] 解码 dense_tokens ...")
+        validate_token_frames(
+            dense_tokens,
+            num_quantizers=num_quantizers,
+            codebook_size=codebook_size,
+            context=f"{name}.dense_tokens",
+        )
         pred_motion = decode_body_tokens(
             model, dense_tokens, placeholder_motion_dict,
             mean, std, device, src_fps, tgt_fps,
@@ -287,14 +409,17 @@ def process_single_result(
         pred_name = f"{safe_name}_pred"
         # JSON
         pred_anim = postprocesser.convert_quat_motion_to_ue_from_bvh(motion=pred_motion)
-        pred_anim = add_face_animation_to_json(
+        pred_anim = maybe_add_face_animation(
             anim_data=pred_anim,
+            face_mode=face_mode,
             audio_bytes=audio_bytes,
             sample_rate=sample_rate,
             face_data=face_data,
             audio_feature_extractor=audio_feature_extractor,
             audio_encoder=audio_encoder,
             face_vq_model=face_vq_model,
+            face_pipeline=face_pipeline,
+            audio_features=audio_features,
             demo_id=safe_name
         )
         
@@ -307,12 +432,22 @@ def process_single_result(
         bvh_path = os.path.join(output_dir, f"{pred_name}.bvh")
         postprocesser.save_quat_motion_to_bvh(motion=pred_motion, save_path=bvh_path)
         print(f"  [Pred] 保存 BVH  → {bvh_path}")
+
+        npy_path = os.path.join(output_dir, f"{pred_name}.npy")
+        save_eval_motion_npy(npy_path, name, pred_motion)
+        print(f"  [Pred] 保存 NPY  → {npy_path}")
     else:
         print("  [Pred] 无 dense_tokens，跳过")
 
     # ---- 解码 gt_tokens (Ground Truth) ----
     if gt_tokens:
         print("  [GT]   解码 gt_tokens ...")
+        validate_token_frames(
+            gt_tokens,
+            num_quantizers=num_quantizers,
+            codebook_size=codebook_size,
+            context=f"{name}.gt_tokens",
+        )
         gt_motion = decode_body_tokens(
             model, gt_tokens, placeholder_motion_dict,
             mean, std, device, src_fps, tgt_fps,
@@ -322,14 +457,17 @@ def process_single_result(
         gt_name = f"{safe_name}_gt"
         # JSON
         gt_anim = postprocesser.convert_quat_motion_to_ue_from_bvh(motion=gt_motion)
-        gt_anim = add_face_animation_to_json(
+        gt_anim = maybe_add_face_animation(
             anim_data=gt_anim,
+            face_mode=face_mode,
             audio_bytes=audio_bytes,
             sample_rate=sample_rate,
             face_data=face_data,
             audio_feature_extractor=audio_feature_extractor,
             audio_encoder=audio_encoder,
             face_vq_model=face_vq_model,
+            face_pipeline=face_pipeline,
+            audio_features=audio_features,
             demo_id=safe_name
         )
         
@@ -342,6 +480,10 @@ def process_single_result(
         bvh_path = os.path.join(output_dir, f"{gt_name}.bvh")
         postprocesser.save_quat_motion_to_bvh(motion=gt_motion, save_path=bvh_path)
         print(f"  [GT]   保存 BVH  → {bvh_path}")
+
+        npy_path = os.path.join(output_dir, f"{gt_name}.npy")
+        save_eval_motion_npy(npy_path, name, gt_motion)
+        print(f"  [GT]   保存 NPY  → {npy_path}")
     else:
         print("  [GT]   无 gt_tokens，跳过")
 
@@ -393,6 +535,17 @@ def main():
     parser.add_argument("--face_npy_path", type=str,
                         default=None,
                         help="面部动画模板数据路径")
+    parser.add_argument("--face_mode", type=str, default="legacy",
+                        choices=["legacy", "infill", "none"],
+                        help="Face generation mode: legacy FaceVQVAE, paper-style infill, or none")
+    parser.add_argument("--face_rvqvae_ckpt", type=str, default=None,
+                        help="Face R-VQVAE checkpoint for --face_mode infill")
+    parser.add_argument("--face_infill_ckpt", type=str, default=None,
+                        help="Face Infill Transformer checkpoint for --face_mode infill")
+    parser.add_argument("--audio_feat_dir", type=str, default=None,
+                        help="Precomputed audio feature directory for --face_mode infill")
+    parser.add_argument("--face_generate_steps", type=int, default=6,
+                        help="Face Infill Transformer generate steps")
     
     args = parser.parse_args()
 
@@ -441,30 +594,49 @@ def main():
         
     if args.face_npy_path is None:
         args.face_npy_path = os.path.join(module_dir, "meta/face_anim/20260120_1632_Exp_Basic_Neutral_M_A_3_iphone_cal.npy")
-    print("Loading face animation models...")
-    face_data = np.load(args.face_npy_path)
-    print(f"Loaded face template data: shape={face_data.shape}")
+    face_data = np.load(args.face_npy_path) if args.face_mode == "legacy" else None
+    if face_data is not None:
+        print(f"Loaded face template data: shape={face_data.shape}")
     
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     model = load_model(args.checkpoint_path, config, device)
 
     # ---- 加载 Face 模型 ----
-    if FACE_MODEL_AVAILABLE:
+    face_pipeline = None
+    if args.face_mode == "legacy" and FACE_MODEL_AVAILABLE:
         face_vq_model, weight_matrix, weight_matrix_R_I = load_face_vqvae()
         audio_encoder, audio_feature_extractor = load_chinese_hubert()
         print("Face animation models loaded successfully")
     else:
         face_vq_model = audio_encoder = audio_feature_extractor = None
+    if args.face_mode == "infill":
+        if args.face_rvqvae_ckpt is None or args.face_infill_ckpt is None:
+            raise ValueError("--face_mode infill requires --face_rvqvae_ckpt and --face_infill_ckpt")
+        if args.audio_feat_dir is None:
+            args.audio_feat_dir = os.path.join(project_dir, "data/audio_features_hubert_layer9_fps10")
+        from face_infill import FaceInfillPipeline
+
+        face_pipeline = FaceInfillPipeline(
+            face_rvqvae_ckpt=args.face_rvqvae_ckpt,
+            face_infill_ckpt=args.face_infill_ckpt,
+            device=device,
+            generate_steps=args.face_generate_steps,
+        )
+        print("Face Infill pipeline loaded successfully")
 
     # ---- 加载归一化参数 ----
-    meta_dir = os.path.join(module_dir, "meta/mta_gen_demo")
-    mean = torch.tensor(np.load(os.path.join(meta_dir, "mean.npy"))).to(device)
-    std = torch.tensor(np.load(os.path.join(meta_dir, "std.npy"))).to(device)
+    # Prefer checkpoint-local meta/mean.npy and meta/std.npy, with bundled demo stats as fallback.
+    mean, std = load_motion_stats(args.checkpoint_path, device)
     print(f"[模型] mean/std 加载完成, shape: {mean.shape}")
 
     # ---- 加载占位符动作数据 ----
     print(f"[数据] 加载占位符: {args.placeholder_npy}")
     placeholder_motion_dict = np.load(args.placeholder_npy, allow_pickle=True).item()
+    validate_placeholder_motion(
+        placeholder_motion_dict,
+        left_dim=int(config.data.left_dim),
+        right_dim=int(config.data.right_dim),
+    )
 
     # ---- 后处理器 ----
     postprocesser = MotionPostprocesser()
@@ -488,14 +660,22 @@ def main():
             tgt_fps=args.tgt_fps,
             wave_folder=args.wave_folder,
             face_data=face_data,
+            face_mode=args.face_mode,
+            face_pipeline=face_pipeline,
+            audio_feat_dir=args.audio_feat_dir,
+            audio_feature_extractor=audio_feature_extractor,
+            audio_encoder=audio_encoder,
+            face_vq_model=face_vq_model,
+            num_quantizers=int(config.model.num_quantizers),
+            codebook_size=int(config.model.nb_code),
         )
 
     print(f"\n{'=' * 60}")
     print(f"  重建完成！共处理 {len(results)} 个样本")
     print(f"  输出目录: {args.output_dir}")
     print(f"  每个样本生成:")
-    print(f"    - *_pred.json / *_pred.bvh  (预测结果)")
-    print(f"    - *_gt.json   / *_gt.bvh    (Ground Truth)")
+    print(f"    - *_pred.json / *_pred.bvh / *_pred.npy  (预测结果)")
+    print(f"    - *_gt.json   / *_gt.bvh   / *_gt.npy    (Ground Truth)")
     print(f"    - *.wav                      (对应音频)")
     print(f"{'=' * 60}")
 
